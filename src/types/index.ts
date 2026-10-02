@@ -46,7 +46,8 @@ export interface Activity {
 
 export interface Message {
   messageId: string;
-  activityId: string;
+  activityId?: string;
+  podId?: string;
   senderId: string;
   senderName: string;
   message: string;
