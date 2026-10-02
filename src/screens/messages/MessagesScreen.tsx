@@ -29,8 +29,11 @@ export default function MessagesScreen({ navigation }: Props) {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    if (!userProfile) return;
-    try { const all = await getActivitiesForPods(userProfile.podsJoined); setChats(all.filter((a) => a.participants.includes(userProfile.uid))); }
+    try {
+      if (!userProfile) return;
+      const all = await getActivitiesForPods(userProfile.podsJoined);
+      setChats(all.filter((a) => a.participants.includes(userProfile.uid)));
+    }
     finally { setLoading(false); setRefreshing(false); }
   }, [userProfile]);
 

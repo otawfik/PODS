@@ -19,8 +19,8 @@ export default function MyPodsScreen({ navigation }: Props) {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    if (!userProfile) return;
     try {
+      if (!userProfile) return;
       const data = await getUserPods(userProfile.podsJoined);
       setPods(data);
       // Opportunistically clean up pod IDs that no longer exist

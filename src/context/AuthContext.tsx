@@ -1,11 +1,11 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { auth } from '../services/firebase';
-import { getUserProfile } from '../services/auth';
+import { ensureUserProfile, getUserProfile } from '../services/auth';
 import { User } from '../types';
 
 interface AuthContextType {
-  firebaseUser: any | null;
+  firebaseUser: FirebaseUser | null;
   userProfile: User | null;
   loading: boolean;
   refreshProfile: () => Promise<void>;
@@ -19,7 +19,7 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [firebaseUser, setFirebaseUser] = useState<any | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -32,14 +32,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setFirebaseUser(user);
-      if (user) {
-        const profile = await getUserProfile(user.uid);
-        setUserProfile(profile);
-      } else {
-        setUserProfile(null);
+      try {
+        setFirebaseUser(user);
+        if (user) {
+          // Self-heal: an authed user with no profile doc (e.g. a failed
+          // setDoc mid-register) gets a minimal doc instead of a
+          // permanent loading spinner.
+          const profile = await ensureUserProfile(user);
+          setUserProfile(profile);
+        } else {
+          setUserProfile(null);
+        }
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
     return unsubscribe;
   }, []);

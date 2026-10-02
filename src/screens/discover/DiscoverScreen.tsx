@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator,
-  RefreshControl, ScrollView,
+  RefreshControl, ScrollView, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -27,8 +27,8 @@ export default function DiscoverScreen({ navigation }: Props) {
   const [joiningPodId, setJoiningPodId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!userProfile) return;
     try {
+      if (!userProfile) return;
       // Always fetch fresh podsJoined from Firestore so we don't rely on stale cache
       const freshProfile = await getUserProfile(userProfile.uid);
       const joinedPodIds = freshProfile?.podsJoined ?? userProfile.podsJoined;
@@ -62,7 +62,12 @@ export default function DiscoverScreen({ navigation }: Props) {
 
   const handleRequestJoin = async (activityId: string) => {
     if (!userProfile) return;
-    try { await requestJoinActivity(activityId, userProfile.uid); await load(); } catch { }
+    try {
+      await requestJoinActivity(activityId, userProfile.uid);
+      await load();
+    } catch (err: any) {
+      Alert.alert('Could not join', err.message ?? 'Something went wrong');
+    }
   };
 
   const handleJoinPod = async (podId: string) => {
@@ -72,7 +77,9 @@ export default function DiscoverScreen({ navigation }: Props) {
       await joinPod(podId, userProfile.uid);
       await refreshProfile();
       await load();
-    } catch { }
+    } catch (err: any) {
+      Alert.alert('Could not join pod', err.message ?? 'Something went wrong');
+    }
     finally { setJoiningPodId(null); }
   };
 
