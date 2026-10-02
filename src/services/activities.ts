@@ -5,6 +5,7 @@ import {
   getDoc,
   getDocs,
   updateDoc,
+  deleteDoc,
   arrayUnion,
   arrayRemove,
   increment,
@@ -16,6 +17,8 @@ import {
 import { db } from './firebase';
 import { Activity } from '../types';
 import { getUserProfile } from './auth';
+import { getPod } from './pods';
+import { deleteActivityMessages } from './chat';
 
 export async function createActivity(
   data: Omit<Activity, 'activityId' | 'currentParticipants' | 'participants' | 'pendingRequests' | 'status' | 'university'>,
@@ -55,10 +58,13 @@ export async function getActivity(activityId: string): Promise<Activity | null> 
   const snap = await getDoc(doc(db, 'activities', activityId));
   if (!snap.exists()) return null;
   const data = snap.data() as Activity;
-  // Auto-expire check
+  // Auto-expire check. When an activity expires we also clean up its chat
+  // messages (best effort — only the host is allowed to delete them, so
+  // non-host callers will fail silently here and the host's client retries).
   if (data.status === 'active' && new Date(data.expiresAt) < new Date()) {
     await updateDoc(doc(db, 'activities', activityId), { status: 'expired' });
     data.status = 'expired';
+    deleteActivityMessages(activityId).catch(() => {});
   }
   return data;
 }
@@ -152,9 +158,31 @@ export async function rejectJoinRequest(activityId: string, userId: string): Pro
 export async function leaveActivity(activityId: string, userId: string): Promise<void> {
   const activity = await getActivity(activityId);
   if (!activity) return;
-
+  // The host can't abandon an activity — it would orphan it with no one able
+  // to manage requests. Delete it instead.
+  if (activity.hostId === userId) {
+    throw new Error('As the host you cannot leave your own activity. Delete it instead.');
+  }
   await updateDoc(doc(db, 'activities', activityId), {
     participants: arrayRemove(userId),
-    currentParticipants: Math.max(0, activity.currentParticipants - 1),
+    currentParticipants: increment(-1),
   });
+}
+
+/**
+ * Delete an activity and its chat messages. Allowed for the host or a pod
+ * admin (mirrored in firestore.rules).
+ */
+export async function deleteActivity(activityId: string, userId: string): Promise<void> {
+  const snap = await getDoc(doc(db, 'activities', activityId));
+  if (!snap.exists()) return;
+  const activity = snap.data() as Activity;
+  const pod = await getPod(activity.podId);
+  const isHost = activity.hostId === userId;
+  const isPodAdmin = pod?.admins.includes(userId) ?? false;
+  if (!isHost && !isPodAdmin) {
+    throw new Error('Only the host or a pod admin can delete this activity');
+  }
+  await deleteActivityMessages(activityId).catch(() => {});
+  await deleteDoc(doc(db, 'activities', activityId));
 }

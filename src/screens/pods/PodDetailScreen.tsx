@@ -7,13 +7,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { PodsStackParamList, Pod, Activity, Message, User } from '../../types';
+import { PodsStackParamList, Pod, Activity, Message, User, PodCategory } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { getPod, joinPod, leavePod, grantAdmin, removeAdmin } from '../../services/pods';
+import { getPod, joinPod, leavePod, grantAdmin, removeAdmin, updatePod, deletePod } from '../../services/pods';
 import { getUserProfile } from '../../services/auth';
 import { getActivitiesForPod, requestJoinActivity } from '../../services/activities';
 import { sendPodMessage, subscribeToPodMessages } from '../../services/chat';
+import { POD_CATEGORIES } from '../../constants/categories';
+import { PodBannerColors } from '../../constants/colors';
+import CategoryChip from '../../components/CategoryChip';
 import ActivityCard from '../../components/ActivityCard';
 import AvatarInitials from '../../components/AvatarInitials';
 import MessageBubble from '../../components/MessageBubble';
@@ -48,6 +51,14 @@ export default function PodDetailScreen({ navigation, route }: Props) {
   const [selectedMember, setSelectedMember] = useState<User | null>(null);
   const [memberModalVisible, setMemberModalVisible] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
+
+  // Edit pod state (admin)
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editCategory, setEditCategory] = useState<PodCategory>('Social');
+  const [editBannerColor, setEditBannerColor] = useState(PodBannerColors[0]);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -116,13 +127,58 @@ export default function PodDetailScreen({ navigation, route }: Props) {
     catch (err: any) { Alert.alert('Error', err.message); }
   };
 
-  const handleLeave = () => Alert.alert('Leave Pod', `Leave ${pod.name}?`, [
+  const handleLeave = () => Alert.alert('Leave Pod', `Leave ${pod?.name ?? 'this pod'}?`, [
     { text: 'Cancel', style: 'cancel' },
     { text: 'Leave', style: 'destructive', onPress: async () => {
       try { await leavePod(podId, uid); await refreshProfile(); navigation.goBack(); }
       catch (err: any) { Alert.alert('Error', err.message); }
     }},
   ]);
+
+  const openEditModal = () => {
+    if (!pod) return;
+    setEditName(pod.name);
+    setEditDescription(pod.description);
+    setEditCategory(pod.category);
+    setEditBannerColor(pod.bannerColor);
+    setEditModalVisible(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editName.trim()) return Alert.alert('Error', 'Pod name cannot be empty');
+    setSavingEdit(true);
+    try {
+      await updatePod(podId, uid, {
+        name: editName.trim(),
+        description: editDescription.trim(),
+        category: editCategory,
+        bannerColor: editBannerColor,
+      });
+      setEditModalVisible(false);
+      await load();
+    } catch (err: any) {
+      Alert.alert('Error', err.message);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDeletePod = () => Alert.alert(
+    'Delete Pod',
+    `Delete "${pod?.name ?? 'this pod'}" and all its activities and chats? This cannot be undone.`,
+    [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        try {
+          await deletePod(podId, uid);
+          await refreshProfile();
+          navigation.goBack();
+        } catch (err: any) {
+          Alert.alert('Error', err.message);
+        }
+      }},
+    ]
+  );
 
   const handleRequestJoin = async (activityId: string) => {
     try { await requestJoinActivity(activityId, uid); await load(); }
@@ -293,10 +349,20 @@ export default function PodDetailScreen({ navigation, route }: Props) {
           </View>
         ) : null}
         <Text style={s.infoDescription}>{pod.description}</Text>
-        {isMember && !isAdmin && (
+        {isMember && (
           <TouchableOpacity style={s.leaveBtn} onPress={handleLeave}>
             <Text style={s.leaveBtnText}>Leave Pod</Text>
           </TouchableOpacity>
+        )}
+        {isAdmin && (
+          <>
+            <TouchableOpacity style={s.editPodBtn} onPress={openEditModal}>
+              <Text style={s.editPodBtnText}>Edit Pod</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.deletePodBtn} onPress={handleDeletePod}>
+              <Text style={s.deletePodBtnText}>Delete Pod</Text>
+            </TouchableOpacity>
+          </>
         )}
       </View>
     );
@@ -440,6 +506,67 @@ export default function PodDetailScreen({ navigation, route }: Props) {
           </View>
         </View>
       </Modal>
+      {/* Edit Pod Modal (admin) */}
+      <Modal
+        visible={editModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setEditModalVisible(false)}
+      >
+        <View style={s.modalOverlay}>
+          <View style={[s.modalContent, { backgroundColor: colors.card }]}>
+            <View style={s.modalHeader}>
+              <Text style={[s.modalTitle, { color: colors.text }]}>Edit Pod</Text>
+              <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                <Ionicons name="close" size={24} color={colors.subtext} />
+              </TouchableOpacity>
+            </View>
+            <View style={s.editForm}>
+              <Text style={s.editLabel}>Pod Name</Text>
+              <TextInput
+                style={[s.editInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground }]}
+                value={editName}
+                onChangeText={setEditName}
+                maxLength={50}
+                placeholderTextColor={colors.subtext}
+              />
+              <Text style={s.editLabel}>Description</Text>
+              <TextInput
+                style={[s.editInput, s.editTextarea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground }]}
+                value={editDescription}
+                onChangeText={setEditDescription}
+                multiline
+                numberOfLines={3}
+                maxLength={200}
+                placeholderTextColor={colors.subtext}
+              />
+              <Text style={s.editLabel}>Category</Text>
+              <View style={s.editChipsRow}>
+                {POD_CATEGORIES.map((cat) => (
+                  <CategoryChip key={cat} label={cat} selected={editCategory === cat} onPress={() => setEditCategory(cat)} small />
+                ))}
+              </View>
+              <Text style={s.editLabel}>Banner Color</Text>
+              <View style={s.editColorRow}>
+                {PodBannerColors.map((color) => (
+                  <TouchableOpacity
+                    key={color}
+                    style={[s.editColorSwatch, { backgroundColor: color }, editBannerColor === color && s.editColorSwatchSelected]}
+                    onPress={() => setEditBannerColor(color)}
+                  >
+                    {editBannerColor === color && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TouchableOpacity style={s.editSaveBtn} onPress={handleSaveEdit} disabled={savingEdit}>
+                {savingEdit
+                  ? <ActivityIndicator size="small" color="#FFFFFF" />
+                  : <Text style={s.editSaveBtnText}>Save Changes</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -519,5 +646,20 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   inviteCodeValue: { fontSize: 22, fontWeight: '800', letterSpacing: 3 },
   leaveBtn: { marginTop: 32, borderWidth: 1.5, borderColor: c.danger, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   leaveBtnText: { color: c.danger, fontWeight: '600', fontSize: 15 },
+  editPodBtn: { marginTop: 12, borderWidth: 1.5, borderColor: c.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  editPodBtnText: { color: c.primary, fontWeight: '600', fontSize: 15 },
+  deletePodBtn: { marginTop: 12, borderRadius: 12, paddingVertical: 14, alignItems: 'center', backgroundColor: c.danger },
+  deletePodBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+  // Edit pod modal
+  editForm: { padding: 20, paddingBottom: 32 },
+  editLabel: { fontSize: 13, fontWeight: '700', color: c.text, marginBottom: 8, marginTop: 14 },
+  editInput: { borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, borderWidth: 1.5 },
+  editTextarea: { height: 80, textAlignVertical: 'top' },
+  editChipsRow: { flexDirection: 'row', flexWrap: 'wrap' },
+  editColorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  editColorSwatch: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  editColorSwatchSelected: { borderWidth: 3, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 4 },
+  editSaveBtn: { marginTop: 24, backgroundColor: c.primary, borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
+  editSaveBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
   fab: { position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', shadowColor: c.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6 },
 });

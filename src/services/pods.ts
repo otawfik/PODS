@@ -6,6 +6,7 @@ import {
   getDocs,
   setDoc,
   updateDoc,
+  deleteDoc,
   arrayUnion,
   arrayRemove,
   increment,
@@ -14,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Pod, PodCategory } from '../types';
+import { deletePodMessages } from './chat';
 
 /** Short, unambiguous invite code (no 0/O, 1/I/L). */
 export function generateInviteCode(): string {
@@ -169,6 +171,72 @@ export async function removeAdmin(podId: string, userId: string): Promise<void> 
   await updateDoc(doc(db, 'pods', podId), {
     admins: arrayRemove(userId),
   });
+}
+
+export interface PodUpdates {
+  name?: string;
+  description?: string;
+  category?: PodCategory;
+  bannerColor?: string;
+}
+
+/** Edit pod metadata. Admins only (mirrored in firestore.rules). */
+export async function updatePod(podId: string, userId: string, updates: PodUpdates): Promise<void> {
+  const pod = await getPod(podId);
+  if (!pod) throw new Error('Pod not found');
+  if (!pod.admins.includes(userId)) throw new Error('Only admins can edit this pod');
+  const allowed: Record<string, string> = {};
+  if (updates.name !== undefined && updates.name.trim()) allowed.name = updates.name.trim();
+  if (updates.description !== undefined && updates.description.trim()) {
+    allowed.description = updates.description.trim();
+  }
+  if (updates.category !== undefined) allowed.category = updates.category;
+  if (updates.bannerColor !== undefined) allowed.bannerColor = updates.bannerColor;
+  if (Object.keys(allowed).length === 0) return;
+  await updateDoc(doc(db, 'pods', podId), allowed);
+}
+
+/**
+ * Delete a pod and everything under it: its activities, its chat messages,
+ * and its invite code. Admins only (mirrored in firestore.rules).
+ * Members' podsJoined lists are cleaned opportunistically on next load
+ * (see removePodsFromUser) since rules only let users edit their own doc.
+ */
+export async function deletePod(podId: string, userId: string): Promise<void> {
+  const pod = await getPod(podId);
+  if (!pod) return;
+  if (!pod.admins.includes(userId)) throw new Error('Only admins can delete this pod');
+
+  // Delete the pod's activities and their chat messages. Security rules
+  // permit pod admins to delete activities in their pod.
+  const activitiesSnap = await getDocs(
+    query(collection(db, 'activities'), where('podId', '==', podId))
+  );
+  for (const activityDoc of activitiesSnap.docs) {
+    await deleteActivityMessages(activityDoc.id).catch(() => {});
+    await deleteDoc(activityDoc.ref).catch(() => {});
+  }
+
+  await deletePodMessages(podId).catch(() => {});
+  if (pod.inviteCode) {
+    await deleteDoc(doc(db, 'podInvites', pod.inviteCode)).catch(() => {});
+  }
+  await deleteDoc(doc(db, 'pods', podId));
+  await updateDoc(doc(db, 'users', userId), {
+    podsJoined: arrayRemove(podId),
+  }).catch(() => {});
+}
+
+/**
+ * Remove pod IDs that no longer exist from a user's podsJoined list
+ * (e.g. after a pod was deleted). Call after loading the user's pods.
+ */
+export async function removePodsFromUser(userId: string, podIds: string[]): Promise<void> {
+  if (podIds.length === 0) return;
+  const userRef = doc(db, 'users', userId);
+  for (const podId of podIds) {
+    await updateDoc(userRef, { podsJoined: arrayRemove(podId) });
+  }
 }
 
 export async function searchPods(searchTerm: string): Promise<Pod[]> {

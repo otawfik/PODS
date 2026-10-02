@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { PodsStackParamList, Pod } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { getUserPods } from '../../services/pods';
+import { getUserPods, removePodsFromUser } from '../../services/pods';
 import PodCard from '../../components/PodCard';
 
 type Props = { navigation: NativeStackNavigationProp<PodsStackParamList, 'MyPods'> };
@@ -20,7 +20,18 @@ export default function MyPodsScreen({ navigation }: Props) {
 
   const load = useCallback(async () => {
     if (!userProfile) return;
-    try { const data = await getUserPods(userProfile.podsJoined); setPods(data); }
+    try {
+      const data = await getUserPods(userProfile.podsJoined);
+      setPods(data);
+      // Opportunistically clean up pod IDs that no longer exist
+      // (e.g. pods deleted by an admin). Rules only let users edit
+      // their own doc, so each user prunes their own list.
+      const foundIds = new Set(data.map((p) => p.podId));
+      const dangling = (userProfile.podsJoined ?? []).filter((id) => !foundIds.has(id));
+      if (dangling.length > 0) {
+        await removePodsFromUser(userProfile.uid, dangling).catch(() => {});
+      }
+    }
     finally { setLoading(false); setRefreshing(false); }
   }, [userProfile]);
 

@@ -8,7 +8,7 @@ import { Activity } from '../../types';
 import { CategoryColors } from '../../constants/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { getActivity, requestJoinActivity, leaveActivity } from '../../services/activities';
+import { getActivity, requestJoinActivity, leaveActivity, deleteActivity } from '../../services/activities';
 import CategoryChip from '../../components/CategoryChip';
 import AvatarInitials from '../../components/AvatarInitials';
 
@@ -55,12 +55,38 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
     finally { setActionLoading(false); }
   };
 
+  const handleDelete = () => {
+    Alert.alert('Delete Activity', `Delete "${activity?.title}" and its chat? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          setActionLoading(true);
+          try {
+            await deleteActivity(activityId, uid);
+            navigation.goBack();
+          } catch (err: any) {
+            Alert.alert('Error', err.message);
+          } finally {
+            setActionLoading(false);
+          }
+        },
+      },
+    ]);
+  };
+
   const renderActionButton = () => {
     if (isHost) return (
-      <TouchableOpacity style={[s.actionBtn, { backgroundColor: colors.primary }]}
-        onPress={() => navigation.navigate('JoinRequests', { activityId, activityTitle: activity.title })}>
-        <Text style={s.actionBtnText}>Manage Requests ({activity.pendingRequests.length})</Text>
-      </TouchableOpacity>
+      <View style={s.hostActions}>
+        <TouchableOpacity style={[s.actionBtn, { backgroundColor: colors.primary }]}
+          onPress={() => navigation.navigate('JoinRequests', { activityId, activityTitle: activity.title })}>
+          <Text style={s.actionBtnText}>Manage Requests ({activity.pendingRequests.length})</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.actionBtn, s.deleteBtn]} onPress={handleDelete}>
+          {actionLoading ? <ActivityIndicator color={colors.danger} /> : <Text style={s.deleteBtnText}>Delete Activity</Text>}
+        </TouchableOpacity>
+      </View>
     );
     if (isExpired) return <Text style={[s.statusText, { color: colors.subtext }]}>This activity has expired</Text>;
     if (isParticipant) return (
@@ -166,7 +192,10 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   hostBadge: { backgroundColor: c.primary, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   hostBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
   actionContainer: { paddingTop: 8, alignItems: 'center' },
+  hostActions: { width: '100%', gap: 12 },
   actionBtn: { borderRadius: 14, paddingVertical: 15, paddingHorizontal: 40, alignItems: 'center', width: '100%' },
   actionBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
+  deleteBtn: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: c.danger },
+  deleteBtnText: { color: c.danger, fontWeight: '700', fontSize: 16 },
   statusText: { fontSize: 15, fontWeight: '600' },
 });
