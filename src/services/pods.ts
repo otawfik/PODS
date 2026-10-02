@@ -15,10 +15,21 @@ import {
 import { db } from './firebase';
 import { Pod, PodCategory } from '../types';
 
+/** Short, unambiguous invite code (no 0/O, 1/I/L). */
+export function generateInviteCode(): string {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+}
+
 export async function createPod(
-  data: Omit<Pod, 'podId' | 'createdAt' | 'memberCount' | 'members' | 'admins'>,
+  data: Omit<Pod, 'podId' | 'createdAt' | 'memberCount' | 'members' | 'admins' | 'inviteCode'>,
   userId: string
 ): Promise<string> {
+  const inviteCode = generateInviteCode();
   const ref = await addDoc(collection(db, 'pods'), {
     ...data,
     createdBy: userId,
@@ -26,8 +37,16 @@ export async function createPod(
     memberCount: 1,
     members: [userId],
     admins: [userId],
+    inviteCode,
   });
   await updateDoc(ref, { podId: ref.id });
+
+  // Mirror code -> podId so "join with code" works without exposing
+  // private pod documents (see firestore.rules).
+  await setDoc(doc(db, 'podInvites', inviteCode), {
+    podId: ref.id,
+    createdAt: new Date().toISOString(),
+  });
 
   // Add pod to user's joined list
   await updateDoc(doc(db, 'users', userId), {
@@ -63,7 +82,7 @@ export async function getUserPods(podIds: string[]): Promise<Pod[]> {
   return pods;
 }
 
-export async function joinPod(podId: string, userId: string): Promise<void> {
+export async function joinPod(podId: string, userId: string, inviteCode?: string): Promise<void> {
   const podRef = doc(db, 'pods', podId);
   const snap = await getDoc(podRef);
   if (!snap.exists()) throw new Error('Pod not found');
@@ -71,6 +90,14 @@ export async function joinPod(podId: string, userId: string): Promise<void> {
   // Already a member: arrayUnion would dedupe the uid but a naive
   // read-then-write counter would still double-count. Bail out early.
   if (pod.members.includes(userId)) return;
+  // Private pods require the invite code (pods created before invite codes
+  // existed have none stored and remain joinable).
+  if (pod.visibility === 'private' && pod.inviteCode) {
+    const attempt = (inviteCode ?? '').trim().toUpperCase();
+    if (!attempt || attempt !== pod.inviteCode.toUpperCase()) {
+      throw new Error('This pod is private. Enter a valid invite code to join.');
+    }
+  }
   await updateDoc(podRef, {
     members: arrayUnion(userId),
     memberCount: increment(1),
@@ -78,6 +105,36 @@ export async function joinPod(podId: string, userId: string): Promise<void> {
   await updateDoc(doc(db, 'users', userId), {
     podsJoined: arrayUnion(podId),
   });
+}
+
+/**
+ * Join a (possibly private) pod with an invite code. Resolves the code via
+ * the podInvites collection so private pod documents stay unreadable to
+ * non-members (enforced by firestore.rules).
+ */
+export async function joinPodWithCode(code: string, userId: string): Promise<string> {
+  const normalized = code.trim().toUpperCase();
+  if (!normalized) throw new Error('Enter an invite code');
+  const inviteSnap = await getDoc(doc(db, 'podInvites', normalized));
+  if (!inviteSnap.exists()) throw new Error('Invalid invite code');
+  const podId = (inviteSnap.data() as { podId: string }).podId;
+
+  // Already a member? Check the user's own doc (readable) instead of the
+  // pod doc (not readable for private pods).
+  const userSnap = await getDoc(doc(db, 'users', userId));
+  const joined: string[] = userSnap.data()?.podsJoined ?? [];
+  if (joined.includes(podId)) throw new Error('You are already a member of this pod');
+
+  // arrayUnion dedupes members; the code itself was the authorization.
+  // Security rules restrict this update to self-only membership changes.
+  await updateDoc(doc(db, 'pods', podId), {
+    members: arrayUnion(userId),
+    memberCount: increment(1),
+  });
+  await updateDoc(doc(db, 'users', userId), {
+    podsJoined: arrayUnion(podId),
+  });
+  return podId;
 }
 
 export async function leavePod(podId: string, userId: string): Promise<void> {

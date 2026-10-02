@@ -18,7 +18,7 @@ import { Activity } from '../types';
 import { getUserProfile } from './auth';
 
 export async function createActivity(
-  data: Omit<Activity, 'activityId' | 'currentParticipants' | 'participants' | 'pendingRequests' | 'status'>,
+  data: Omit<Activity, 'activityId' | 'currentParticipants' | 'participants' | 'pendingRequests' | 'status' | 'university'>,
   userId: string
 ): Promise<string> {
   // Only pod members can post activities into a pod.
@@ -28,8 +28,13 @@ export async function createActivity(
     throw new Error('You must be a pod member to post an activity');
   }
 
+  // Stamp the creator's university so university-wide discovery can query it.
+  const profile = await getUserProfile(userId);
+  const university = profile?.university ?? 'Unknown University';
+
   const ref = await addDoc(collection(db, 'activities'), {
     ...data,
+    university,
     hostId: userId,
     currentParticipants: 1,
     participants: [userId],
@@ -79,6 +84,25 @@ export async function getActivitiesForPods(podIds: string[]): Promise<Activity[]
   return activities.sort(
     (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
   );
+}
+
+/**
+ * University-wide discovery: activities marked university-visible at the
+ * given university, regardless of pod membership. Requires the composite
+ * index in firestore.indexes.json (deployed via firebase.json).
+ */
+export async function getUniversityActivities(university: string): Promise<Activity[]> {
+  if (!university) return [];
+  const q = query(
+    collection(db, 'activities'),
+    where('visibility', '==', 'university'),
+    where('university', '==', university),
+    where('status', '==', 'active')
+  );
+  const snap = await getDocs(q);
+  return snap.docs
+    .map((d) => d.data() as Activity)
+    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 }
 
 export async function requestJoinActivity(activityId: string, userId: string): Promise<void> {

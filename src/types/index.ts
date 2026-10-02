@@ -23,6 +23,8 @@ export interface Pod {
   members: string[];
   admins: string[];
   bannerColor: string;
+  /** Short shareable code for joining private pods (also mirrored to podInvites). */
+  inviteCode: string;
 }
 
 export interface Activity {
@@ -41,6 +43,8 @@ export interface Activity {
   pendingRequests: string[];
   status: 'active' | 'expired';
   visibility: 'pod' | 'university';
+  /** Creator's university — powers university-wide discovery. */
+  university: string;
   autoApprove: boolean;
 }
 

@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { DiscoverStackParamList, Activity, Pod } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { getActivitiesForPods } from '../../services/activities';
+import { getActivitiesForPods, getUniversityActivities } from '../../services/activities';
 import { getPublicPods, joinPod } from '../../services/pods';
 import { getUserProfile } from '../../services/auth';
 import ActivityCard from '../../components/ActivityCard';
@@ -34,8 +34,18 @@ export default function DiscoverScreen({ navigation }: Props) {
       const joinedPodIds = freshProfile?.podsJoined ?? userProfile.podsJoined;
 
       // Fetch activities and public pods independently — failure in one won't block the other
-      const activityData = await getActivitiesForPods(joinedPodIds).catch(() => [] as Activity[]);
-      setActivities(activityData);
+      const [podActivities, universityActivities] = await Promise.all([
+        getActivitiesForPods(joinedPodIds).catch(() => [] as Activity[]),
+        getUniversityActivities(userProfile.university).catch(() => [] as Activity[]),
+      ]);
+      // Merge, dedupe by id, and drop expired activities.
+      const merged = new Map<string, Activity>();
+      for (const a of [...podActivities, ...universityActivities]) merged.set(a.activityId, a);
+      const now = new Date();
+      const visible = [...merged.values()]
+        .filter((a) => a.status === 'active' && new Date(a.expiresAt) > now)
+        .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+      setActivities(visible);
 
       const podData = await getPublicPods().catch(() => [] as Pod[]);
       const notJoined = podData
@@ -117,7 +127,7 @@ export default function DiscoverScreen({ navigation }: Props) {
 
       <View style={s.feedHeader}>
         <Text style={s.feedTitle}>Activity Feed</Text>
-        <Text style={s.feedSubtitle}>From your pods</Text>
+        <Text style={s.feedSubtitle}>From your pods and your university</Text>
       </View>
     </>
   );

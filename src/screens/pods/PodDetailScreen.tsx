@@ -283,6 +283,15 @@ export default function PodDetailScreen({ navigation, route }: Props) {
             <Text style={s.infoValue}>{item.value}</Text>
           </View>
         ))}
+        {isMember && pod.inviteCode ? (
+          <View style={s.inviteCodeBox}>
+            <View>
+              <Text style={s.inviteCodeLabel}>Invite Code</Text>
+              <Text style={s.inviteCodeHint}>Share it to let others join</Text>
+            </View>
+            <Text style={[s.inviteCodeValue, { color: colors.primary }]}>{pod.inviteCode}</Text>
+          </View>
+        ) : null}
         <Text style={s.infoDescription}>{pod.description}</Text>
         {isMember && !isAdmin && (
           <TouchableOpacity style={s.leaveBtn} onPress={handleLeave}>
@@ -504,6 +513,10 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   infoLabel: { fontSize: 14, color: c.subtext },
   infoValue: { fontSize: 14, fontWeight: '600', color: c.text },
   infoDescription: { marginTop: 20, fontSize: 15, color: c.text, lineHeight: 22 },
+  inviteCodeBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, backgroundColor: c.primaryGlow, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14 },
+  inviteCodeLabel: { fontSize: 13, fontWeight: '700', color: c.text },
+  inviteCodeHint: { fontSize: 12, color: c.subtext, marginTop: 2 },
+  inviteCodeValue: { fontSize: 22, fontWeight: '800', letterSpacing: 3 },
   leaveBtn: { marginTop: 32, borderWidth: 1.5, borderColor: c.danger, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   leaveBtnText: { color: c.danger, fontWeight: '600', fontSize: 15 },
   fab: { position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', shadowColor: c.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6 },

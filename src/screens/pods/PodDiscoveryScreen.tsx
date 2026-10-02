@@ -7,7 +7,7 @@ import { Pod, PodCategory } from '../../types';
 import { POD_CATEGORIES } from '../../constants/categories';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { getPublicPods, joinPod } from '../../services/pods';
+import { getPublicPods, joinPod, joinPodWithCode } from '../../services/pods';
 import PodCard from '../../components/PodCard';
 import CategoryChip from '../../components/CategoryChip';
 
@@ -23,6 +23,8 @@ export default function PodDiscoveryScreen({ navigation }: Props) {
   const [selectedCat, setSelectedCat] = useState<PodCategory | null>(null);
   const [loading, setLoading] = useState(true);
   const [joiningId, setJoiningId] = useState<string | null>(null);
+  const [inviteCode, setInviteCode] = useState('');
+  const [joiningWithCode, setJoiningWithCode] = useState(false);
 
   useEffect(() => { getPublicPods().then((d) => { setPods(d); setLoading(false); }); }, []);
   useEffect(() => {
@@ -40,6 +42,22 @@ export default function PodDiscoveryScreen({ navigation }: Props) {
     finally { setJoiningId(null); }
   };
 
+  const handleJoinWithCode = async () => {
+    if (!userProfile) return;
+    if (!inviteCode.trim()) return Alert.alert('Enter a code', 'Type the invite code shared by a pod member.');
+    setJoiningWithCode(true);
+    try {
+      const podId = await joinPodWithCode(inviteCode, userProfile.uid);
+      await refreshProfile();
+      setInviteCode('');
+      navigation.navigate('PodDetail', { podId });
+    } catch (err: any) {
+      Alert.alert('Could not join', err.message ?? 'Invalid invite code');
+    } finally {
+      setJoiningWithCode(false);
+    }
+  };
+
   const s = makeStyles(colors);
 
   return (
@@ -50,6 +68,31 @@ export default function PodDiscoveryScreen({ navigation }: Props) {
         </TouchableOpacity>
         <Text style={s.title}>Discover Pods</Text>
         <View style={{ width: 24 }} />
+      </View>
+
+      <View style={s.inviteRow}>
+        <View style={s.inviteInputContainer}>
+          <Ionicons name="ticket-outline" size={18} color={colors.subtext} style={s.searchIcon} />
+          <TextInput
+            style={s.searchInput}
+            placeholder="Have an invite code?"
+            placeholderTextColor={colors.subtext}
+            value={inviteCode}
+            onChangeText={(t) => setInviteCode(t.toUpperCase())}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={12}
+          />
+        </View>
+        <TouchableOpacity
+          style={[s.inviteBtn, joiningWithCode && s.inviteBtnDisabled]}
+          onPress={handleJoinWithCode}
+          disabled={joiningWithCode}
+        >
+          {joiningWithCode
+            ? <ActivityIndicator size="small" color="#FFFFFF" />
+            : <Text style={s.inviteBtnText}>Join</Text>}
+        </TouchableOpacity>
       </View>
 
       <View style={s.searchContainer}>
@@ -95,6 +138,11 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBackground, borderRadius: 12, marginHorizontal: 16, marginBottom: 12, paddingHorizontal: 14, borderWidth: 1.5, borderColor: c.border },
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, paddingVertical: 12, fontSize: 15, color: c.text },
+  inviteRow: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 12, gap: 10 },
+  inviteInputContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, paddingHorizontal: 14, borderWidth: 1.5, borderColor: c.border, borderStyle: 'dashed' },
+  inviteBtn: { backgroundColor: c.primary, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+  inviteBtnDisabled: { opacity: 0.5 },
+  inviteBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
   filterRow: { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 12, flexWrap: 'nowrap' },
   allChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: c.primaryGlow, marginRight: 8 },
   allChipSelected: { backgroundColor: c.primary },
