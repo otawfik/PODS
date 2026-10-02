@@ -15,7 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Pod, PodCategory } from '../types';
-import { deletePodMessages } from './chat';
+import { deleteActivityMessages, deletePodMessages } from './chat';
 
 /** Short, unambiguous invite code (no 0/O, 1/I/L). */
 export function generateInviteCode(): string {
