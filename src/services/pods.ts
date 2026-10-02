@@ -8,6 +8,7 @@ import {
   updateDoc,
   arrayUnion,
   arrayRemove,
+  increment,
   query,
   where,
 } from 'firebase/firestore';
@@ -63,9 +64,16 @@ export async function getUserPods(podIds: string[]): Promise<Pod[]> {
 }
 
 export async function joinPod(podId: string, userId: string): Promise<void> {
-  await updateDoc(doc(db, 'pods', podId), {
+  const podRef = doc(db, 'pods', podId);
+  const snap = await getDoc(podRef);
+  if (!snap.exists()) throw new Error('Pod not found');
+  const pod = snap.data() as Pod;
+  // Already a member: arrayUnion would dedupe the uid but a naive
+  // read-then-write counter would still double-count. Bail out early.
+  if (pod.members.includes(userId)) return;
+  await updateDoc(podRef, {
     members: arrayUnion(userId),
-    memberCount: (await getDoc(doc(db, 'pods', podId))).data()!.memberCount + 1,
+    memberCount: increment(1),
   });
   await updateDoc(doc(db, 'users', userId), {
     podsJoined: arrayUnion(podId),
@@ -73,12 +81,21 @@ export async function joinPod(podId: string, userId: string): Promise<void> {
 }
 
 export async function leavePod(podId: string, userId: string): Promise<void> {
-  const podSnap = await getDoc(doc(db, 'pods', podId));
-  const current = podSnap.data()?.memberCount ?? 1;
-  await updateDoc(doc(db, 'pods', podId), {
+  const podRef = doc(db, 'pods', podId);
+  const snap = await getDoc(podRef);
+  if (!snap.exists()) return;
+  const pod = snap.data() as Pod;
+  if (!pod.members.includes(userId)) return;
+  // Never strand a pod without admins.
+  if (pod.admins.includes(userId) && pod.admins.length === 1) {
+    throw new Error(
+      'You are the last admin. Grant admin to another member or delete the pod instead.'
+    );
+  }
+  await updateDoc(podRef, {
     members: arrayRemove(userId),
     admins: arrayRemove(userId),
-    memberCount: Math.max(0, current - 1),
+    memberCount: increment(-1),
   });
   await updateDoc(doc(db, 'users', userId), {
     podsJoined: arrayRemove(podId),

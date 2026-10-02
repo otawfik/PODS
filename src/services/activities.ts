@@ -7,17 +7,27 @@ import {
   updateDoc,
   arrayUnion,
   arrayRemove,
+  increment,
+  runTransaction,
   query,
   where,
   orderBy,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Activity } from '../types';
+import { getUserProfile } from './auth';
 
 export async function createActivity(
   data: Omit<Activity, 'activityId' | 'currentParticipants' | 'participants' | 'pendingRequests' | 'status'>,
   userId: string
 ): Promise<string> {
+  // Only pod members can post activities into a pod.
+  const podSnap = await getDoc(doc(db, 'pods', data.podId));
+  const podMembers: string[] = podSnap.data()?.members ?? [];
+  if (!podSnap.exists() || !podMembers.includes(userId)) {
+    throw new Error('You must be a pod member to post an activity');
+  }
+
   const ref = await addDoc(collection(db, 'activities'), {
     ...data,
     hostId: userId,
@@ -28,9 +38,9 @@ export async function createActivity(
   });
   await updateDoc(ref, { activityId: ref.id });
 
-  // Update host's postsCount
+  // Update host's postsCount atomically.
   await updateDoc(doc(db, 'users', userId), {
-    postsCount: (await getDoc(doc(db, 'users', userId))).data()!.postsCount + 1,
+    postsCount: increment(1),
   });
 
   return ref.id;
@@ -86,17 +96,26 @@ export async function requestJoinActivity(activityId: string, userId: string): P
 }
 
 export async function approveJoinRequest(activityId: string, userId: string): Promise<void> {
-  const activity = await getActivity(activityId);
-  if (!activity) throw new Error('Activity not found');
-
-  if (activity.currentParticipants >= activity.maxParticipants) {
-    throw new Error('Activity is full');
-  }
-
-  await updateDoc(doc(db, 'activities', activityId), {
-    participants: arrayUnion(userId),
-    pendingRequests: arrayRemove(userId),
-    currentParticipants: activity.currentParticipants + 1,
+  const activityRef = doc(db, 'activities', activityId);
+  // Transaction: re-check capacity atomically so two hosts approving at the
+  // same time can't overfill the activity.
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(activityRef);
+    if (!snap.exists()) throw new Error('Activity not found');
+    const activity = snap.data() as Activity;
+    if (activity.participants.includes(userId)) {
+      // Already in — just clear any stale pending request.
+      tx.update(activityRef, { pendingRequests: arrayRemove(userId) });
+      return;
+    }
+    if (activity.currentParticipants >= activity.maxParticipants) {
+      throw new Error('Activity is full');
+    }
+    tx.update(activityRef, {
+      participants: arrayUnion(userId),
+      pendingRequests: arrayRemove(userId),
+      currentParticipants: increment(1),
+    });
   });
 }
 
