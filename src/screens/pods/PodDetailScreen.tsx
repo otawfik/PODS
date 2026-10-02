@@ -78,14 +78,24 @@ export default function PodDetailScreen({ navigation, route }: Props) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Subscribe to pod chat
+  const uid = userProfile?.uid ?? '';
+  // Derived from loaded pod (null until loaded) — safe default false.
+  const isMember = pod?.members.includes(uid) ?? false;
+  const isAdmin = pod?.admins.includes(uid) ?? false;
+
+  // Subscribe to pod chat — members only. Non-members see the join prompt
+  // instead of other people's messages (also enforced by security rules).
   useEffect(() => {
+    if (!isMember) {
+      setMessages([]);
+      return;
+    }
     const unsub = subscribeToPodMessages(podId, (msgs) => {
       setMessages(msgs);
       setTimeout(() => chatListRef.current?.scrollToEnd({ animated: true }), 100);
     });
     return unsub;
-  }, [podId]);
+  }, [podId, isMember]);
 
   // Fetch member profiles when pod data is available
   useEffect(() => {
@@ -117,10 +127,6 @@ export default function PodDetailScreen({ navigation, route }: Props) {
       </View>
     );
   }
-
-  const uid = userProfile?.uid ?? '';
-  const isMember = pod.members.includes(uid);
-  const isAdmin = pod.admins.includes(uid);
 
   const handleJoin = async () => {
     try { await joinPod(podId, uid); await refreshProfile(); await load(); }

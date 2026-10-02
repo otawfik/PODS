@@ -33,6 +33,15 @@ export async function registerUser(
     };
 
     await setDoc(doc(db, 'users', credential.user.uid), userData);
+
+    // Require email verification for the student-only premise. Non-fatal:
+    // if sending fails the account still works and the user can resend
+    // from the verification screen.
+    try {
+      await sendEmailVerification(credential.user);
+    } catch {
+      // ignore — resend is available in-app
+    }
     return userData;
   } catch (err) {
     // setDoc/updateProfile failed after the auth account was created —
@@ -89,4 +98,13 @@ export async function getUserProfile(uid: string): Promise<User | null> {
 
 export async function updateUserProfile(uid: string, updates: Partial<User>): Promise<void> {
   await setDoc(doc(db, 'users', uid), updates, { merge: true });
+  // Keep the Firebase Auth profile in sync so auth.currentUser.displayName
+  // (used across the app) doesn't go stale.
+  if (
+    updates.displayName !== undefined &&
+    auth.currentUser &&
+    auth.currentUser.uid === uid
+  ) {
+    await updateProfile(auth.currentUser, { displayName: updates.displayName });
+  }
 }

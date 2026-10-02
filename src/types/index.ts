@@ -73,6 +73,7 @@ export type ActivityCategory = 'Study' | 'Gym' | 'Social' | 'Sports' | 'Food' | 
 // Navigation param lists
 export type RootStackParamList = {
   Auth: undefined;
+  VerifyEmail: undefined;
   Main: undefined;
 };
 

@@ -6,11 +6,12 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import AuthStack from './AuthStack';
 import MainTabs from './MainTabs';
+import VerifyEmailScreen from '../screens/auth/VerifyEmailScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
-  const { firebaseUser, loading } = useAuth();
+  const { firebaseUser, emailVerified, loading } = useAuth();
   const { colors } = useTheme();
 
   if (loading) {
@@ -24,7 +25,11 @@ export default function RootNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       {firebaseUser ? (
-        <Stack.Screen name="Main" component={MainTabs} />
+        emailVerified ? (
+          <Stack.Screen name="Main" component={MainTabs} />
+        ) : (
+          <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
+        )
       ) : (
         <Stack.Screen name="Auth" component={AuthStack} />
       )}

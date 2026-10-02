@@ -7,6 +7,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
 import { loginUser } from '../../services/auth';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { auth } from '../../services/firebase';
 
 type Props = { navigation: NativeStackNavigationProp<AuthStackParamList, 'Login'> };
 
@@ -25,6 +27,20 @@ export default function LoginScreen({ navigation }: Props) {
       Alert.alert('Login Failed', err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const target = email.trim().toLowerCase();
+    if (!target) {
+      Alert.alert('Enter your email', 'Type your account email above, then tap "Forgot password?"');
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(auth, target);
+      Alert.alert('Check your inbox', `A password reset link was sent to ${target}.`);
+    } catch (err: any) {
+      Alert.alert('Error', err.message ?? 'Could not send reset email');
     }
   };
 
@@ -56,6 +72,10 @@ export default function LoginScreen({ navigation }: Props) {
             {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={s.submitBtnText}>Log In</Text>}
           </TouchableOpacity>
 
+          <TouchableOpacity onPress={handleForgotPassword} style={s.forgotLink}>
+            <Text style={s.forgotLinkText}>Forgot password?</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity onPress={() => navigation.navigate('Register')} style={s.registerLink}>
             <Text style={s.registerLinkText}>Don't have an account? <Text style={s.registerLinkBold}>Sign Up</Text></Text>
           </TouchableOpacity>
@@ -78,6 +98,8 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   submitBtn: { backgroundColor: c.primary, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 8, marginBottom: 20 },
   submitBtnDisabled: { opacity: 0.6 },
   submitBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 17 },
+  forgotLink: { alignItems: 'center', marginBottom: 20 },
+  forgotLinkText: { color: c.primary, fontSize: 14, fontWeight: '600' },
   registerLink: { alignItems: 'center' },
   registerLinkText: { color: c.subtext, fontSize: 15 },
   registerLinkBold: { color: c.primary, fontWeight: '700' },

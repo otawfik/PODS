@@ -4,11 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { Activity } from '../../types';
+import { Activity, User } from '../../types';
 import { CategoryColors } from '../../constants/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { getActivity, requestJoinActivity, leaveActivity, deleteActivity } from '../../services/activities';
+import { getUserProfile } from '../../services/auth';
 import CategoryChip from '../../components/CategoryChip';
 import AvatarInitials from '../../components/AvatarInitials';
 
@@ -30,9 +31,31 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
   const [activity, setActivity] = useState<Activity | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [participantProfiles, setParticipantProfiles] = useState<Record<string, User>>({});
 
   const load = async () => { const d = await getActivity(activityId); setActivity(d); setLoading(false); };
   useEffect(() => { load(); }, [activityId]);
+
+  // Resolve participant uids to real profile names (like PodDetailScreen does).
+  useEffect(() => {
+    if (!activity) return;
+    let cancelled = false;
+    (async () => {
+      const profiles: Record<string, User> = {};
+      await Promise.all(
+        activity.participants.map(async (pid) => {
+          try {
+            const p = await getUserProfile(pid);
+            if (p) profiles[pid] = p;
+          } catch {
+            // ignore — falls back to "Member"
+          }
+        })
+      );
+      if (!cancelled) setParticipantProfiles(profiles);
+    })();
+    return () => { cancelled = true; };
+  }, [activity?.participants.join('|')]);
 
   const s = makeStyles(colors);
   if (loading || !activity) return <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
@@ -151,13 +174,19 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
 
         <View style={s.section}>
           <Text style={s.sectionTitle}>Participants ({activity.currentParticipants})</Text>
-          {activity.participants.map((pid) => (
-            <View key={pid} style={s.participantRow}>
-              <AvatarInitials name={pid === uid ? userProfile?.displayName ?? 'You' : 'Member'} size={32} />
-              <Text style={s.participantName}>{pid === uid ? `${userProfile?.displayName} (You)` : 'Member'}</Text>
-              {pid === activity.hostId && <View style={s.hostBadge}><Text style={s.hostBadgeText}>Host</Text></View>}
-            </View>
-          ))}
+          {activity.participants.map((pid) => {
+            const profileName = participantProfiles[pid]?.displayName;
+            const name = pid === uid
+              ? `${userProfile?.displayName ?? 'You'} (You)`
+              : profileName ?? 'Member';
+            return (
+              <View key={pid} style={s.participantRow}>
+                <AvatarInitials name={name} size={32} />
+                <Text style={s.participantName}>{name}</Text>
+                {pid === activity.hostId && <View style={s.hostBadge}><Text style={s.hostBadgeText}>Host</Text></View>}
+              </View>
+            );
+          })}
         </View>
 
         <View style={s.actionContainer}>{renderActionButton()}</View>
