@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity,
-  KeyboardAvoidingView, Platform, ActivityIndicator,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -12,6 +12,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { sendMessage, subscribeToMessages } from '../../services/chat';
 import MessageBubble from '../../components/MessageBubble';
+import KeyboardAwareView from '../../components/KeyboardAwareView';
 
 type Props = {
   navigation: NativeStackNavigationProp<MessagesStackParamList, 'Chat'>;
@@ -76,7 +77,7 @@ export default function ChatScreen({ navigation, route }: Props) {
         <Text style={s.warningText}>Temporary chat · Messages delete when activity expires</Text>
       </View>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAwareView onKeyboardShown={() => flatListRef.current?.scrollToEnd({ animated: true })}>
         <FlatList ref={flatListRef} data={messages} keyExtractor={(item) => item.messageId}
           renderItem={({ item }) => <MessageBubble message={item} isOwn={item.senderId === userProfile?.uid} />}
           contentContainerStyle={s.messageList}
@@ -106,7 +107,7 @@ export default function ChatScreen({ navigation, route }: Props) {
             </TouchableOpacity>
           </View>
         )}
-      </KeyboardAvoidingView>
+      </KeyboardAwareView>
     </SafeAreaView>
   );
 }

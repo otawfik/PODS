@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator,
-  FlatList, Alert, TextInput, KeyboardAvoidingView, Platform, Modal,
+  FlatList, Alert, TextInput, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RouteProp } from '@react-navigation/native';
+import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { PodsStackParamList, Pod, Activity, Message, User, PodCategory } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
@@ -20,6 +20,7 @@ import CategoryChip from '../../components/CategoryChip';
 import ActivityCard from '../../components/ActivityCard';
 import AvatarInitials from '../../components/AvatarInitials';
 import MessageBubble from '../../components/MessageBubble';
+import KeyboardAwareView from '../../components/KeyboardAwareView';
 
 type Props = {
   navigation: NativeStackNavigationProp<PodsStackParamList, 'PodDetail'>;
@@ -76,7 +77,8 @@ export default function PodDetailScreen({ navigation, route }: Props) {
     }
   }, [podId]);
 
-  useEffect(() => { load(); }, [load]);
+  // Reload whenever the screen comes back into view (e.g. after creating something).
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const uid = userProfile?.uid ?? '';
   // Derived from loaded pod (null until loaded) — safe default false.
@@ -237,7 +239,7 @@ export default function PodDetailScreen({ navigation, route }: Props) {
   const renderContent = () => {
     if (tab === 'Chat') {
       return (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={180}>
+        <KeyboardAwareView onKeyboardShown={() => chatListRef.current?.scrollToEnd({ animated: true })}>
           <FlatList
             ref={chatListRef}
             data={messages}
@@ -277,7 +279,7 @@ export default function PodDetailScreen({ navigation, route }: Props) {
               <Text style={s.joinToChatText}>Join this pod to participate in the chat</Text>
             </View>
           )}
-        </KeyboardAvoidingView>
+        </KeyboardAwareView>
       );
     }
 

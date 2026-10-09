@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator,
   RefreshControl, ScrollView, Alert,
@@ -58,7 +59,8 @@ export default function DiscoverScreen({ navigation }: Props) {
     }
   }, [userProfile]);
 
-  useEffect(() => { load(); }, [load]);
+  // Reload whenever the screen comes back into view (e.g. after creating something).
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const handleRequestJoin = async (activityId: string) => {
     if (!userProfile) return;
