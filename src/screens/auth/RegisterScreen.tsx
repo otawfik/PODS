@@ -6,6 +6,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 import { registerUser } from '../../services/auth';
 import { isEduEmail, getUniversityFromEmail } from '../../constants/categories';
 
@@ -13,6 +14,7 @@ type Props = { navigation: NativeStackNavigationProp<AuthStackParamList, 'Regist
 
 export default function RegisterScreen({ navigation }: Props) {
   const { colors } = useTheme();
+  const { startVerification } = useAuth();
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,7 +34,10 @@ export default function RegisterScreen({ navigation }: Props) {
     if (password.length < 6) return Alert.alert('Error', 'Password must be at least 6 characters');
     setLoading(true);
     try {
-      await registerUser(email.trim().toLowerCase(), password, displayName.trim());
+      const normalizedEmail = email.trim().toLowerCase();
+      await registerUser(normalizedEmail, password, displayName.trim());
+      // Account created; Supabase emailed a code. Show the code screen.
+      startVerification(normalizedEmail);
     } catch (err: any) {
       Alert.alert('Registration Failed', err.message);
     } finally {

@@ -1,34 +1,91 @@
-import {
-  collection,
-  addDoc,
-  query,
-  where,
-  orderBy,
-  limit,
-  onSnapshot,
-  getDocs,
-  writeBatch,
-  Unsubscribe,
-} from 'firebase/firestore';
-import { db } from './firebase';
+import { supabase, check } from './supabase';
 import { Message } from '../types';
 
-// Chat lives in the `messages` Firestore collection. Each document carries
-// either activityId (activity group chat) or podId (pod group chat).
-// Security rules (firestore.rules) restrict reads/writes to participants.
-const MESSAGES_COLLECTION = 'messages';
+// Chat lives in the `messages` table. Each row carries either activity_id
+// (activity group chat) or pod_id (pod group chat). Row Level Security
+// restricts reads/writes to participants; realtime pushes new rows live.
 const PAGE_SIZE = 50;
 
-function toMessage(id: string, data: Record<string, any>): Message {
+export type Unsubscribe = () => void;
+
+type MessageRow = {
+  id: string;
+  activity_id: string | null;
+  pod_id: string | null;
+  sender_id: string;
+  sender_name: string;
+  message: string;
+  created_at: string;
+};
+
+function toMessage(row: MessageRow): Message {
   return {
-    messageId: id,
-    activityId: data.activityId,
-    podId: data.podId,
-    senderId: data.senderId,
-    senderName: data.senderName,
-    message: data.message,
-    timestamp: data.timestamp,
+    messageId: row.id,
+    activityId: row.activity_id ?? undefined,
+    podId: row.pod_id ?? undefined,
+    senderId: row.sender_id,
+    senderName: row.sender_name,
+    message: row.message,
+    timestamp: new Date(row.created_at).getTime(),
   };
+}
+
+type Room = { column: 'activity_id' | 'pod_id'; id: string };
+
+async function fetchLatest(room: Room): Promise<Message[]> {
+  const rows = check(
+    await supabase
+      .from('messages')
+      .select('*')
+      .eq(room.column, room.id)
+      .order('created_at', { ascending: false })
+      .limit(PAGE_SIZE)
+  );
+  return (rows as MessageRow[]).map(toMessage).reverse(); // chronological for display
+}
+
+/**
+ * Live view of the latest PAGE_SIZE messages in a room. Calls back with the
+ * full list on load and after every change, like a Firestore snapshot.
+ */
+function subscribeToRoom(room: Room, callback: (messages: Message[]) => void): Unsubscribe {
+  let closed = false;
+  let latestRequest = 0;
+
+  const refresh = () => {
+    const requestId = ++latestRequest;
+    fetchLatest(room)
+      .then((messages) => {
+        // Ignore stale responses that finish after a newer one.
+        if (!closed && requestId === latestRequest) callback(messages);
+      })
+      .catch((err) => console.warn('Chat load failed', err));
+  };
+
+  const channel = supabase
+    .channel(`messages:${room.column}:${room.id}:${Date.now()}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'messages', filter: `${room.column}=eq.${room.id}` },
+      refresh
+    )
+    // Deletes can't be filtered server-side; refetching is cheap.
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, refresh)
+    .subscribe((status) => {
+      // (Re)load once the channel is live so nothing sent in between is missed.
+      if (status === 'SUBSCRIBED') refresh();
+    });
+
+  refresh();
+
+  return () => {
+    closed = true;
+    supabase.removeChannel(channel);
+  };
+}
+
+async function insertMessage(row: Omit<MessageRow, 'id' | 'created_at'>): Promise<void> {
+  check(await supabase.from('messages').insert(row));
 }
 
 // ---------- Activity chat ----------
@@ -39,30 +96,14 @@ export async function sendMessage(
   senderName: string,
   message: string
 ): Promise<void> {
-  await addDoc(collection(db, MESSAGES_COLLECTION), {
-    activityId,
-    senderId,
-    senderName,
-    message,
-    timestamp: Date.now(),
-  });
+  await insertMessage({ activity_id: activityId, pod_id: null, sender_id: senderId, sender_name: senderName, message });
 }
 
 export function subscribeToMessages(
   activityId: string,
   callback: (messages: Message[]) => void
 ): Unsubscribe {
-  const q = query(
-    collection(db, MESSAGES_COLLECTION),
-    where('activityId', '==', activityId),
-    orderBy('timestamp', 'desc'),
-    limit(PAGE_SIZE)
-  );
-  return onSnapshot(q, (snapshot) => {
-    const messages = snapshot.docs.map((d) => toMessage(d.id, d.data()));
-    messages.reverse(); // chronological order for display
-    callback(messages);
-  });
+  return subscribeToRoom({ column: 'activity_id', id: activityId }, callback);
 }
 
 // ---------- Pod chat ----------
@@ -73,55 +114,16 @@ export async function sendPodMessage(
   senderName: string,
   message: string
 ): Promise<void> {
-  await addDoc(collection(db, MESSAGES_COLLECTION), {
-    podId,
-    senderId,
-    senderName,
-    message,
-    timestamp: Date.now(),
-  });
+  await insertMessage({ activity_id: null, pod_id: podId, sender_id: senderId, sender_name: senderName, message });
 }
 
 export function subscribeToPodMessages(
   podId: string,
   callback: (messages: Message[]) => void
 ): Unsubscribe {
-  const q = query(
-    collection(db, MESSAGES_COLLECTION),
-    where('podId', '==', podId),
-    orderBy('timestamp', 'desc'),
-    limit(PAGE_SIZE)
-  );
-  return onSnapshot(q, (snapshot) => {
-    const messages = snapshot.docs.map((d) => toMessage(d.id, d.data()));
-    messages.reverse(); // chronological order for display
-    callback(messages);
-  });
+  return subscribeToRoom({ column: 'pod_id', id: podId }, callback);
 }
 
-// ---------- Cleanup (expiry / deletion) ----------
-
-async function deleteMessagesWhere(
-  field: 'activityId' | 'podId',
-  value: string
-): Promise<void> {
-  const snap = await getDocs(
-    query(collection(db, MESSAGES_COLLECTION), where(field, '==', value))
-  );
-  const docs = snap.docs;
-  for (let i = 0; i < docs.length; i += 400) {
-    const batch = writeBatch(db);
-    docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-  }
-}
-
-/** Delete all chat messages for an activity (used when it expires or is deleted). */
-export async function deleteActivityMessages(activityId: string): Promise<void> {
-  await deleteMessagesWhere('activityId', activityId);
-}
-
-/** Delete all chat messages for a pod (used when the pod is deleted). */
-export async function deletePodMessages(podId: string): Promise<void> {
-  await deleteMessagesWhere('podId', podId);
-}
+// Message cleanup on expiry/deletion now happens in the database
+// (expire_activity_if_needed and ON DELETE CASCADE), so there are no
+// client-side delete helpers anymore.

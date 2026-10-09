@@ -1,188 +1,146 @@
-import {
-  collection,
-  doc,
-  addDoc,
-  getDoc,
-  getDocs,
-  updateDoc,
-  deleteDoc,
-  arrayUnion,
-  arrayRemove,
-  increment,
-  runTransaction,
-  query,
-  where,
-  orderBy,
-} from 'firebase/firestore';
-import { db } from './firebase';
-import { Activity } from '../types';
-import { getUserProfile } from './auth';
-import { getPod } from './pods';
-import { deleteActivityMessages } from './chat';
+import { supabase, check } from './supabase';
+import { Activity, ActivityCategory } from '../types';
+
+// Writes run as Postgres functions (supabase/migrations) so capacity checks,
+// counters and permissions are enforced atomically on the server.
+
+type ActivityRow = {
+  id: string;
+  pod_id: string;
+  host_id: string;
+  host_name: string;
+  title: string;
+  category: ActivityCategory;
+  tags: string[];
+  start_time: string;
+  expires_at: string;
+  max_participants: number;
+  current_participants: number;
+  participants: string[];
+  pending_requests: string[];
+  status: 'active' | 'expired';
+  visibility: 'pod' | 'university';
+  university: string;
+  auto_approve: boolean;
+};
+
+function toActivity(row: ActivityRow): Activity {
+  return {
+    activityId: row.id,
+    podId: row.pod_id,
+    hostId: row.host_id,
+    hostName: row.host_name,
+    title: row.title,
+    category: row.category,
+    tags: row.tags ?? [],
+    startTime: row.start_time,
+    expiresAt: row.expires_at,
+    maxParticipants: row.max_participants,
+    currentParticipants: row.current_participants,
+    participants: row.participants ?? [],
+    pendingRequests: row.pending_requests ?? [],
+    status: row.status,
+    visibility: row.visibility,
+    university: row.university,
+    autoApprove: row.auto_approve,
+  };
+}
+
+const byStartTime = (a: Activity, b: Activity) =>
+  new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
 
 export async function createActivity(
   data: Omit<Activity, 'activityId' | 'currentParticipants' | 'participants' | 'pendingRequests' | 'status' | 'university'>,
-  userId: string
+  _userId: string
 ): Promise<string> {
-  // Only pod members can post activities into a pod.
-  const podSnap = await getDoc(doc(db, 'pods', data.podId));
-  const podMembers: string[] = podSnap.data()?.members ?? [];
-  if (!podSnap.exists() || !podMembers.includes(userId)) {
-    throw new Error('You must be a pod member to post an activity');
-  }
-
-  // Stamp the creator's university so university-wide discovery can query it.
-  const profile = await getUserProfile(userId);
-  const university = profile?.university ?? 'Unknown University';
-
-  const ref = await addDoc(collection(db, 'activities'), {
-    ...data,
-    university,
-    hostId: userId,
-    currentParticipants: 1,
-    participants: [userId],
-    pendingRequests: [],
-    status: 'active',
-  });
-  await updateDoc(ref, { activityId: ref.id });
-
-  // Update host's postsCount atomically.
-  await updateDoc(doc(db, 'users', userId), {
-    postsCount: increment(1),
-  });
-
-  return ref.id;
+  // The server checks pod membership, stamps the host's university and
+  // bumps their postsCount.
+  const id = check(
+    await supabase.rpc('create_activity', {
+      p_pod_id: data.podId,
+      p_host_name: data.hostName,
+      p_title: data.title,
+      p_category: data.category,
+      p_tags: data.tags,
+      p_start_time: data.startTime,
+      p_expires_at: data.expiresAt,
+      p_max_participants: data.maxParticipants,
+      p_visibility: data.visibility,
+      p_auto_approve: data.autoApprove,
+    })
+  );
+  return id as string;
 }
 
 export async function getActivity(activityId: string): Promise<Activity | null> {
-  const snap = await getDoc(doc(db, 'activities', activityId));
-  if (!snap.exists()) return null;
-  const data = snap.data() as Activity;
-  // Auto-expire check. When an activity expires we also clean up its chat
-  // messages (best effort — only the host is allowed to delete them, so
-  // non-host callers will fail silently here and the host's client retries).
+  const row = check(
+    await supabase.from('activities').select('*').eq('id', activityId).maybeSingle()
+  );
+  if (!row) return null;
+  const data = toActivity(row as ActivityRow);
+  // Auto-expire check. The server marks it expired and clears its chat.
   if (data.status === 'active' && new Date(data.expiresAt) < new Date()) {
-    await updateDoc(doc(db, 'activities', activityId), { status: 'expired' });
-    data.status = 'expired';
-    deleteActivityMessages(activityId).catch(() => {});
+    const { data: status } = await supabase.rpc('expire_activity_if_needed', {
+      p_activity_id: activityId,
+    });
+    if (status === 'expired') data.status = 'expired';
   }
   return data;
 }
 
 export async function getActivitiesForPod(podId: string): Promise<Activity[]> {
-  const q = query(
-    collection(db, 'activities'),
-    where('podId', '==', podId)
-  );
-  const snap = await getDocs(q);
-  return snap.docs
-    .map((d) => d.data() as Activity)
-    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+  const rows = check(await supabase.from('activities').select('*').eq('pod_id', podId));
+  return (rows as ActivityRow[]).map(toActivity).sort(byStartTime);
 }
 
 export async function getActivitiesForPods(podIds: string[]): Promise<Activity[]> {
   if (podIds.length === 0) return [];
-  const activities: Activity[] = [];
-  for (const podId of podIds) {
-    const podActivities = await getActivitiesForPod(podId);
-    activities.push(...podActivities);
-  }
-  return activities.sort(
-    (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
-  );
+  const rows = check(await supabase.from('activities').select('*').in('pod_id', podIds));
+  return (rows as ActivityRow[]).map(toActivity).sort(byStartTime);
 }
 
 /**
  * University-wide discovery: activities marked university-visible at the
- * given university, regardless of pod membership. Requires the composite
- * index in firestore.indexes.json (deployed via firebase.json).
+ * given university, regardless of pod membership.
  */
 export async function getUniversityActivities(university: string): Promise<Activity[]> {
   if (!university) return [];
-  const q = query(
-    collection(db, 'activities'),
-    where('visibility', '==', 'university'),
-    where('university', '==', university),
-    where('status', '==', 'active')
+  const rows = check(
+    await supabase
+      .from('activities')
+      .select('*')
+      .eq('visibility', 'university')
+      .eq('university', university)
+      .eq('status', 'active')
   );
-  const snap = await getDocs(q);
-  return snap.docs
-    .map((d) => d.data() as Activity)
-    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+  return (rows as ActivityRow[]).map(toActivity).sort(byStartTime);
 }
 
-export async function requestJoinActivity(activityId: string, userId: string): Promise<void> {
+/** Request a spot. Auto-approve activities add the user straight away. */
+export async function requestJoinActivity(activityId: string, _userId: string): Promise<void> {
   const activity = await getActivity(activityId);
   if (!activity) throw new Error('Activity not found');
-
-  if (activity.autoApprove) {
-    await approveJoinRequest(activityId, userId);
-    return;
-  }
-
-  await updateDoc(doc(db, 'activities', activityId), {
-    pendingRequests: arrayUnion(userId),
-  });
+  check(await supabase.rpc('request_join_activity', { p_activity_id: activityId }));
 }
 
+/** Host approves a request; capacity is re-checked atomically on the server. */
 export async function approveJoinRequest(activityId: string, userId: string): Promise<void> {
-  const activityRef = doc(db, 'activities', activityId);
-  // Transaction: re-check capacity atomically so two hosts approving at the
-  // same time can't overfill the activity.
-  await runTransaction(db, async (tx) => {
-    const snap = await tx.get(activityRef);
-    if (!snap.exists()) throw new Error('Activity not found');
-    const activity = snap.data() as Activity;
-    if (activity.participants.includes(userId)) {
-      // Already in — just clear any stale pending request.
-      tx.update(activityRef, { pendingRequests: arrayRemove(userId) });
-      return;
-    }
-    if (activity.currentParticipants >= activity.maxParticipants) {
-      throw new Error('Activity is full');
-    }
-    tx.update(activityRef, {
-      participants: arrayUnion(userId),
-      pendingRequests: arrayRemove(userId),
-      currentParticipants: increment(1),
-    });
-  });
+  check(
+    await supabase.rpc('approve_join_request', { p_activity_id: activityId, p_user_id: userId })
+  );
 }
 
 export async function rejectJoinRequest(activityId: string, userId: string): Promise<void> {
-  await updateDoc(doc(db, 'activities', activityId), {
-    pendingRequests: arrayRemove(userId),
-  });
+  check(
+    await supabase.rpc('reject_join_request', { p_activity_id: activityId, p_user_id: userId })
+  );
 }
 
-export async function leaveActivity(activityId: string, userId: string): Promise<void> {
-  const activity = await getActivity(activityId);
-  if (!activity) return;
-  // The host can't abandon an activity — it would orphan it with no one able
-  // to manage requests. Delete it instead.
-  if (activity.hostId === userId) {
-    throw new Error('As the host you cannot leave your own activity. Delete it instead.');
-  }
-  await updateDoc(doc(db, 'activities', activityId), {
-    participants: arrayRemove(userId),
-    currentParticipants: increment(-1),
-  });
+export async function leaveActivity(activityId: string, _userId: string): Promise<void> {
+  check(await supabase.rpc('leave_activity', { p_activity_id: activityId }));
 }
 
-/**
- * Delete an activity and its chat messages. Allowed for the host or a pod
- * admin (mirrored in firestore.rules).
- */
-export async function deleteActivity(activityId: string, userId: string): Promise<void> {
-  const snap = await getDoc(doc(db, 'activities', activityId));
-  if (!snap.exists()) return;
-  const activity = snap.data() as Activity;
-  const pod = await getPod(activity.podId);
-  const isHost = activity.hostId === userId;
-  const isPodAdmin = pod?.admins.includes(userId) ?? false;
-  if (!isHost && !isPodAdmin) {
-    throw new Error('Only the host or a pod admin can delete this activity');
-  }
-  await deleteActivityMessages(activityId).catch(() => {});
-  await deleteDoc(doc(db, 'activities', activityId));
+/** Delete an activity and its chat. Allowed for the host or a pod admin. */
+export async function deleteActivity(activityId: string, _userId: string): Promise<void> {
+  check(await supabase.rpc('delete_activity', { p_activity_id: activityId }));
 }
