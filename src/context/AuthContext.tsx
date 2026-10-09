@@ -1,77 +1,100 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { auth } from '../services/firebase';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '../services/supabase';
 import { ensureUserProfile, getUserProfile } from '../services/auth';
 import { User } from '../types';
 
 interface AuthContextType {
-  firebaseUser: FirebaseUser | null;
+  /** The signed-in Supabase user. Supabase only signs in verified emails. */
+  authUser: SupabaseUser | null;
   userProfile: User | null;
-  /** Whether the signed-in user has verified their email. */
-  emailVerified: boolean;
+  /**
+   * Email waiting for its verification code (after sign-up, or after trying
+   * to log in to an unverified account). Shows the VerifyEmail screen.
+   */
+  pendingVerificationEmail: string | null;
   loading: boolean;
   refreshProfile: () => Promise<void>;
-  /** Re-check email verification status (after the user clicks the link). */
-  refreshVerification: () => Promise<void>;
+  startVerification: (email: string) => void;
+  cancelVerification: () => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
-  firebaseUser: null,
+  authUser: null,
   userProfile: null,
-  emailVerified: false,
+  pendingVerificationEmail: null,
   loading: true,
   refreshProfile: async () => {},
-  refreshVerification: async () => {},
+  startVerification: () => {},
+  cancelVerification: () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<User | null>(null);
-  const [emailVerified, setEmailVerified] = useState(false);
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Which user's profile is loaded, so token refreshes don't refetch it.
+  const loadedUserId = useRef<string | null>(null);
 
-  const refreshProfile = async () => {
-    if (firebaseUser) {
-      const profile = await getUserProfile(firebaseUser.uid);
+  const refreshProfile = useCallback(async () => {
+    if (authUser) {
+      const profile = await getUserProfile(authUser.id);
       setUserProfile(profile);
     }
-  };
-
-  const refreshVerification = async () => {
-    const user = auth.currentUser;
-    if (user) {
-      await user.reload();
-      setEmailVerified(auth.currentUser?.emailVerified ?? false);
-    }
-  };
+  }, [authUser]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const applySession = async (session: Session | null) => {
+      const user = session?.user ?? null;
+      if (!user) {
+        loadedUserId.current = null;
+        setUserProfile(null);
+        setAuthUser(null);
+        setLoading(false);
+        return;
+      }
+      if (loadedUserId.current === user.id) {
+        setAuthUser(user);
+        return;
+      }
       try {
-        setFirebaseUser(user);
-        if (user) {
-          // Refresh so emailVerified reflects the current server state.
-          await user.reload();
-          setEmailVerified(auth.currentUser?.emailVerified ?? false);
-          // Self-heal: an authed user with no profile doc (e.g. a failed
-          // setDoc mid-register) gets a minimal one instead of a
-          // permanent loading spinner.
-          const profile = await ensureUserProfile(user);
-          setUserProfile(profile);
-        } else {
-          setUserProfile(null);
-          setEmailVerified(false);
-        }
+        // Self-heal: an authed user with no profile row gets a minimal one
+        // instead of a permanent loading spinner.
+        const profile = await ensureUserProfile(user);
+        loadedUserId.current = user.id;
+        setUserProfile(profile);
+      } catch (err) {
+        console.warn('Could not load profile', err);
       } finally {
+        setPendingVerificationEmail(null);
+        setAuthUser(user);
         setLoading(false);
       }
+    };
+
+    // Fires once immediately with the stored session (INITIAL_SESSION), then
+    // on every sign-in / sign-out. Supabase advises not to await other
+    // Supabase calls inside this callback, so the work is deferred.
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      setTimeout(() => {
+        applySession(session);
+      }, 0);
     });
-    return unsubscribe;
+    return () => data.subscription.unsubscribe();
   }, []);
 
   return (
     <AuthContext.Provider
-      value={{ firebaseUser, userProfile, emailVerified, loading, refreshProfile, refreshVerification }}
+      value={{
+        authUser,
+        userProfile,
+        pendingVerificationEmail,
+        loading,
+        refreshProfile,
+        startVerification: setPendingVerificationEmail,
+        cancelVerification: () => setPendingVerificationEmail(null),
+      }}
     >
       {children}
     </AuthContext.Provider>

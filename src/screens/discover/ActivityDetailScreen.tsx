@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RouteProp } from '@react-navigation/native';
+import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Activity, User } from '../../types';
 import { CategoryColors } from '../../constants/colors';
@@ -34,7 +34,8 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
   const [participantProfiles, setParticipantProfiles] = useState<Record<string, User>>({});
 
   const load = async () => { const d = await getActivity(activityId); setActivity(d); setLoading(false); };
-  useEffect(() => { load(); }, [activityId]);
+  // Reload whenever the screen comes back into view.
+  useFocusEffect(useCallback(() => { load(); }, [activityId]));
 
   // Resolve participant uids to real profile names (like PodDetailScreen does).
   useEffect(() => {

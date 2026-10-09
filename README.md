@@ -4,7 +4,7 @@
 
 **PODS** is a cross-platform mobile and web app that helps college students turn "we should hang out sometime" into actual plans. Create or join temporary, activity-based communities ("Pods") for studying, working out, grabbing food, playing sports, gaming, and more. When the activity ends, the Pod ends. No dead group chats, no planning paralysis.
 
-![React Native](https://img.shields.io/badge/React_Native-61DAFB?logo=react&logoColor=black) ![Expo](https://img.shields.io/badge/Expo-000020?logo=expo&logoColor=white) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white) ![Firebase](https://img.shields.io/badge/Firebase-FFCA28?logo=firebase&logoColor=black) ![iOS](https://img.shields.io/badge/iOS-000000?logo=apple&logoColor=white) ![Android](https://img.shields.io/badge/Android-3DDC84?logo=android&logoColor=white) ![Web](https://img.shields.io/badge/Web-4285F4?logo=googlechrome&logoColor=white)
+![React Native](https://img.shields.io/badge/React_Native-61DAFB?logo=react&logoColor=black) ![Expo](https://img.shields.io/badge/Expo-000020?logo=expo&logoColor=white) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white) ![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?logo=supabase&logoColor=white) ![iOS](https://img.shields.io/badge/iOS-000000?logo=apple&logoColor=white) ![Android](https://img.shields.io/badge/Android-3DDC84?logo=android&logoColor=white) ![Web](https://img.shields.io/badge/Web-4285F4?logo=googlechrome&logoColor=white)
 
 **Watch it in action:** [PODS showcase video](https://www.youtube.com/watch?v=ln0N_B_wY80)
 
@@ -34,12 +34,12 @@ Pods are lightweight, purpose-built groups with a shelf life. You open the app, 
 - Browse upcoming activities across all your Pods
 
 **Real-time chat**
-- Pod group chats powered by Firebase Realtime Database
+- Pod and activity group chats powered by Supabase Realtime
 - Direct 1:1 messaging between members
 - Live message updates, no refresh needed
 
 **Accounts & profiles**
-- Email sign-up and login with Firebase Authentication
+- Email sign-up and login with Supabase Auth (6-digit email verification and password-reset codes)
 - Editable user profiles
 
 **Polish**
@@ -53,9 +53,9 @@ Pods are lightweight, purpose-built groups with a shelf life. You open the app, 
 | Layer | Technology |
 |---|---|
 | App | React Native, Expo SDK 54, TypeScript |
-| Auth | Firebase Authentication |
-| Database | Cloud Firestore |
-| Real-time messaging | Firebase Realtime Database |
+| Auth | Supabase Auth (email + password, emailed codes) |
+| Database | Supabase Postgres with Row Level Security (`supabase/migrations/`) |
+| Real-time messaging | Supabase Realtime |
 | Navigation | React Navigation (stack + bottom tabs) |
 
 ---
@@ -68,7 +68,10 @@ Pods are lightweight, purpose-built groups with a shelf life. You open the app, 
 git clone https://github.com/otawfik/PODS.git
 cd PODS
 npm install
+cp .env.example .env   # then fill in your Supabase URL and publishable key
 ```
+
+The database schema lives in `supabase/migrations/`. On a new Supabase project, run that SQL once (Dashboard → SQL Editor).
 
 **Run it:**
 
@@ -80,7 +83,7 @@ npx expo start
 - **On the web:** press `w` in the terminal, or run `npx expo start --web`.
 - **Clear the cache if something looks stale:** `npx expo start -c`
 
-**Firebase setup:** the app uses Firebase for auth, database, and messaging. Add your Firebase web config to the environment (see `src/services/firebase.ts`) before running.
+**Supabase setup:** the app uses Supabase for auth, database, and chat. Put your project URL and publishable key in `.env` (see `.env.example` and `src/services/supabase.ts`) before running.
 
 ---
 
@@ -90,7 +93,7 @@ npx expo start
 src/
   components/    Reusable UI (PodCard, ActivityCard, MessageBubble, ...)
   screens/       Auth, Discover, Pods, Activities, Messages, Profile
-  services/      Firebase-backed data layer (auth, pods, activities, chat)
+  services/      Supabase-backed data layer (auth, pods, activities, chat)
   navigation/    Stack and tab navigators
   context/       Auth and theme providers
   constants/     Categories, tags, colors

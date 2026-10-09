@@ -1,6 +1,5 @@
-// Expo app config. Reads Firebase credentials from environment variables
-// (EXPO_PUBLIC_FIREBASE_*) so no secrets are committed to the repo.
-// Copy .env.example to .env and fill in your Firebase project values.
+// Expo app config. Supabase settings come from EXPO_PUBLIC_SUPABASE_* in
+// .env (read directly in src/services/supabase.ts). Copy .env.example to .env.
 export default {
   expo: {
     name: "PODS",
@@ -28,14 +27,6 @@ export default {
     },
     web: {
       favicon: "./assets/favicon.png"
-    },
-    extra: {
-      firebaseApiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
-      firebaseAuthDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
-      firebaseProjectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
-      firebaseStorageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
-      firebaseMessagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-      firebaseAppId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
     },
   },
 };

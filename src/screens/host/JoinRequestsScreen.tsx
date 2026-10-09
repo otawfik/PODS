@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RouteProp } from '@react-navigation/native';
+import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../context/ThemeContext';
 import { getActivity, approveJoinRequest, rejectJoinRequest } from '../../services/activities';
@@ -34,7 +34,8 @@ export default function JoinRequestsScreen({ navigation, route }: Props) {
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, [activityId]);
+  // Reload whenever the screen comes back into view.
+  useFocusEffect(useCallback(() => { load(); }, [activityId]));
 
   const handleApprove = async (userId: string) => {
     setProcessingId(userId);

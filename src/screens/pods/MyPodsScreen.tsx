@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -35,7 +36,8 @@ export default function MyPodsScreen({ navigation }: Props) {
     finally { setLoading(false); setRefreshing(false); }
   }, [userProfile]);
 
-  useEffect(() => { load(); }, [load]);
+  // Reload whenever the screen comes back into view (e.g. after creating something).
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const s = makeStyles(colors);
   if (loading) return <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
