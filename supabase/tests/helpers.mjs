@@ -21,6 +21,8 @@ export const SUPABASE_STUB = `
   -- Supabase grants EXECUTE on new public functions to these roles by
   -- default; mimic it so the tests prove the migrations' REVOKEs work.
   alter default privileges in schema public grant execute on functions to anon, authenticated;
+  -- ...and ALL on new public tables to anon, authenticated and service_role.
+  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
 
   create schema auth;
   grant usage on schema auth to anon, authenticated, service_role;
