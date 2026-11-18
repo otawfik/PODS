@@ -36,7 +36,7 @@
   },
   "private": true,
   "devDependencies": {
-    "@anthropic-ai/sdk": "^1.10.0",
+    "@anthropic-ai/sdk": "1.6.0",
     "@electric-sql/pglite": "^0.5.16",
     "@testing-library/react-native": "^14.1.0",
     "@types/jest": "^29.5.14",

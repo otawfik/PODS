@@ -12,7 +12,7 @@
 // can read). The Anthropic key never leaves the server.
 
 import { createClient } from 'npm:@supabase/supabase-js@2.117.3';
-import Anthropic from 'npm:@anthropic-ai/sdk@1.10.0';
+import Anthropic from 'npm:@anthropic-ai/sdk@1.6.0';
 import {
   buildClaudeRequest,
   heuristicRank,

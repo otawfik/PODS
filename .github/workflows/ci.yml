@@ -44,4 +44,7 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - run: deno check supabase/functions/*/index.ts
+      # Run from supabase/functions so its deno.json applies: Deno fetches the
+      # npm: imports itself instead of expecting the app's node_modules.
+      - run: deno check */index.ts
+        working-directory: supabase/functions

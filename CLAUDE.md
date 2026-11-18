@@ -39,7 +39,7 @@ npm run typecheck           # tsc --noEmit (excludes Deno function entry points)
 npm test                    # Jest unit/component tests
 npm run test:db             # apply all migrations to PGlite, test RLS/RPCs/hook/cron
 npm run eval:recs           # recommendation eval (add -- --claude to include the LLM)
-npx deno@2 check supabase/functions/*/index.ts   # type-check Edge Functions
+(cd supabase/functions && npx deno@2 check */index.ts)   # type-check Edge Functions
 ```
 
 ## Conventions
