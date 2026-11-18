@@ -1,5 +1,7 @@
 import {
   buildClaudeRequest,
+  CACHE_TTL_MS,
+  cacheDecision,
   buildUserMessage,
   CandidatePod,
   heuristicRank,
@@ -7,6 +9,8 @@ import {
   parseClaudeRanking,
   pickCandidates,
   RECOMMENDATION_MODEL,
+  RECOMPUTE_COOLDOWN_MS,
+  signalsKey,
   StudentSignals,
 } from '../supabase/functions/_shared/recommend';
 
@@ -115,5 +119,64 @@ describe('parseClaudeRanking', () => {
   it('returns [] for malformed output', () => {
     expect(parseClaudeRanking('not json', catalog)).toEqual([]);
     expect(parseClaudeRanking('{"foo": 1}', catalog)).toEqual([]);
+  });
+});
+
+describe('model choice', () => {
+  it('asks for server-side fallback on Opus but not on Haiku', () => {
+    const opus = buildClaudeRequest(student, catalog, 'claude-opus-5-5');
+    expect(opus).toMatchObject({
+      fallbacks: 'default',
+      betas: ['server-side-fallback-2026-07-01'],
+    });
+    const haiku = buildClaudeRequest(student, catalog, 'claude-haiku-5-5');
+    expect(haiku.model).toBe('claude-haiku-5-5');
+    expect(haiku).not.toHaveProperty('fallbacks');
+    expect(haiku).not.toHaveProperty('betas');
+  });
+});
+
+describe('recommendation cache', () => {
+  const key = signalsKey(student, RECOMMENDATION_MODEL);
+  const now = Date.parse('2026-11-18T12:00:00Z');
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+  const recs = [{ podId: 'climb', reason: 'Climbing!', source: 'claude' as const }];
+
+  it('ignores interest order and case, but not content or model', () => {
+    const shuffled = { ...student, interests: ['algorithms', 'CLIMBING'] };
+    expect(signalsKey(shuffled, RECOMMENDATION_MODEL)).toBe(key);
+    expect(signalsKey({ ...student, interests: ['Chess'] }, RECOMMENDATION_MODEL)).not.toBe(key);
+    expect(signalsKey(student, 'claude-haiku-5-5')).not.toBe(key);
+  });
+
+  it('serves a fresh cache with the same signals', () => {
+    expect(
+      cacheDecision({ signalsKey: key, createdAt: ago(60_000), recommendations: recs }, key, now),
+    ).toBe('hit');
+  });
+
+  it('recomputes when the cache is stale, empty, or missing', () => {
+    expect(cacheDecision(null, key, now)).toBe('recompute');
+    expect(
+      cacheDecision(
+        { signalsKey: key, createdAt: ago(CACHE_TTL_MS + 1), recommendations: recs },
+        key,
+        now,
+      ),
+    ).toBe('recompute');
+    expect(
+      cacheDecision({ signalsKey: key, createdAt: ago(60_000), recommendations: [] }, key, now),
+    ).toBe('recompute');
+  });
+
+  it('enforces the cooldown when signals change quickly', () => {
+    const recent = {
+      signalsKey: 'old',
+      createdAt: ago(RECOMPUTE_COOLDOWN_MS - 1000),
+      recommendations: recs,
+    };
+    expect(cacheDecision(recent, key, now)).toBe('cooldown');
+    const older = { ...recent, createdAt: ago(RECOMPUTE_COOLDOWN_MS + 1000) };
+    expect(cacheDecision(older, key, now)).toBe('recompute');
   });
 });

@@ -29,6 +29,8 @@ const SUPABASE_STUB = `
   -- Supabase grants EXECUTE on new public functions to these roles by
   -- default; mimic it so the tests prove the migrations' REVOKEs work.
   alter default privileges in schema public grant execute on functions to anon, authenticated;
+  -- ...and ALL on new public tables to anon, authenticated and service_role.
+  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
 
   create schema auth;
   grant usage on schema auth to anon, authenticated;
@@ -79,7 +81,9 @@ const one = async (sql, params) => (await db.query(sql, params)).rows[0];
 before(async () => {
   db = new PGlite();
   await db.exec(SUPABASE_STUB);
-  const files = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+  const files = readdirSync(migrationsDir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
   assert.ok(files.length >= 3, 'expected the initial migration plus the new ones');
   for (const file of files) {
     try {
@@ -88,7 +92,10 @@ before(async () => {
       throw new Error(`Migration ${file} failed: ${err.message}`);
     }
   }
-  await signUp(ids.alice, 'alice@bu.edu', { display_name: 'Alice', university: 'Harvard University' });
+  await signUp(ids.alice, 'alice@bu.edu', {
+    display_name: 'Alice',
+    university: 'Harvard University',
+  });
   await signUp(ids.bob, 'bob@harvard.edu', { display_name: 'Bob' });
   await signUp(ids.carol, 'carol@cs.bu.edu', { display_name: 'Carol' });
 });
@@ -103,9 +110,11 @@ after(async () => {
 
 test('sign-up hook allows .edu and rejects everything else', async () => {
   const hook = async (email) =>
-    (await one(`select public.hook_before_user_created($1::jsonb) as r`, [
-      JSON.stringify({ user: { email } }),
-    ])).r;
+    (
+      await one(`select public.hook_before_user_created($1::jsonb) as r`, [
+        JSON.stringify({ user: { email } }),
+      ])
+    ).r;
 
   assert.deepEqual(await hook('student@bu.edu'), {});
   assert.deepEqual(await hook('Student@CS.BU.EDU'), {});
@@ -113,7 +122,9 @@ test('sign-up hook allows .edu and rejects everything else', async () => {
     const r = await hook(bad);
     assert.equal(r.error?.http_code, 403, `expected rejection for "${bad}"`);
   }
-  await db.query(`insert into public.signup_email_allowlist (email) values ('reviewer@example.com')`);
+  await db.query(
+    `insert into public.signup_email_allowlist (email) values ('reviewer@example.com')`,
+  );
   assert.deepEqual(await hook('Reviewer@Example.com'), {});
 });
 
@@ -123,7 +134,10 @@ test('app users cannot call the hook or the university lookup', async () => {
       db.query(`select public.hook_before_user_created('{}'::jsonb)`),
       /permission denied/,
     );
-    await assert.rejects(db.query(`select public.university_for_email('x@bu.edu')`), /permission denied/);
+    await assert.rejects(
+      db.query(`select public.university_for_email('x@bu.edu')`),
+      /permission denied/,
+    );
   });
 });
 
@@ -157,11 +171,16 @@ test('users can edit bio/major/interests but not identity columns', async () => 
       );
     }
     await assert.rejects(
-      db.query(`insert into public.profiles (id, email, university) values (gen_random_uuid(), 'a', 'b')`),
+      db.query(
+        `insert into public.profiles (id, email, university) values (gen_random_uuid(), 'a', 'b')`,
+      ),
       /permission denied/,
     );
   });
-  const row = await one(`select bio, major, interests, university from public.profiles where id = $1`, [ids.alice]);
+  const row = await one(
+    `select bio, major, interests, university from public.profiles where id = $1`,
+    [ids.alice],
+  );
   assert.deepEqual(row, {
     bio: 'hi',
     major: 'CS',
@@ -184,20 +203,26 @@ test('ensure_profile recreates a missing profile row', async () => {
 // ---------------------------------------------------------------------------
 
 test('private pods and university activities stay private', async () => {
-  const podId = await asUser(ids.alice, async () =>
-    (await one(`select public.create_pod('Secret', 'shh', 'Study', 'private', null) as id`)).id,
+  const podId = await asUser(
+    ids.alice,
+    async () =>
+      (await one(`select public.create_pod('Secret', 'shh', 'Study', 'private', null) as id`)).id,
   );
   const bobSees = await asUser(ids.bob, () =>
     db.query(`select id from public.pods where id = $1`, [podId]),
   );
   assert.equal(bobSees.rows.length, 0, "Bob must not read Alice's private pod");
 
-  const actId = await asUser(ids.alice, async () =>
-    (await one(
-      `select public.create_activity($1, 'Alice', 'Library grind', 'Study', '{}',
+  const actId = await asUser(
+    ids.alice,
+    async () =>
+      (
+        await one(
+          `select public.create_activity($1, 'Alice', 'Library grind', 'Study', '{}',
          now() + interval '1 hour', now() + interval '3 hours', 5, 'university', false) as id`,
-      [podId],
-    )).id,
+          [podId],
+        )
+      ).id,
   );
   const carolSees = await asUser(ids.carol, () =>
     db.query(`select id from public.activities where id = $1`, [actId]),
@@ -210,15 +235,21 @@ test('private pods and university activities stay private', async () => {
 });
 
 test('only the host approves, and capacity is enforced', async () => {
-  const podId = await asUser(ids.alice, async () =>
-    (await one(`select public.create_pod('Hoops', '', 'Sports', 'public', null) as id`)).id,
+  const podId = await asUser(
+    ids.alice,
+    async () =>
+      (await one(`select public.create_pod('Hoops', '', 'Sports', 'public', null) as id`)).id,
   );
-  const actId = await asUser(ids.alice, async () =>
-    (await one(
-      `select public.create_activity($1, 'Alice', '2v2', 'Sports', '{}',
+  const actId = await asUser(
+    ids.alice,
+    async () =>
+      (
+        await one(
+          `select public.create_activity($1, 'Alice', '2v2', 'Sports', '{}',
          now() + interval '1 hour', now() + interval '2 hours', 2, 'university', false) as id`,
-      [podId],
-    )).id,
+          [podId],
+        )
+      ).id,
   );
   await asUser(ids.carol, () => db.query(`select public.request_join_activity($1)`, [actId]));
   await asUser(ids.carol, () =>
@@ -247,16 +278,20 @@ test('only the host approves, and capacity is enforced', async () => {
 // ---------------------------------------------------------------------------
 
 test('expire_due_activities expires past activities and clears their chat', async () => {
-  const podId = await asUser(ids.alice, async () =>
-    (await one(`select public.create_pod('Food', '', 'Food', 'public', null) as id`)).id,
+  const podId = await asUser(
+    ids.alice,
+    async () =>
+      (await one(`select public.create_pod('Food', '', 'Food', 'public', null) as id`)).id,
   );
   const [pastId, futureId] = await asUser(ids.alice, async () => {
     const mk = async (expires) =>
-      (await one(
-        `select public.create_activity($1, 'Alice', 'Lunch', 'Food', '{}',
+      (
+        await one(
+          `select public.create_activity($1, 'Alice', 'Lunch', 'Food', '{}',
            now() - interval '3 hours', ${expires}, 4, 'pod', true) as id`,
-        [podId],
-      )).id;
+          [podId],
+        )
+      ).id;
     const past = await mk(`now() + interval '1 hour'`);
     const future = await mk(`now() + interval '1 hour'`);
     await db.query(
@@ -266,7 +301,10 @@ test('expire_due_activities expires past activities and clears their chat', asyn
     return [past, future];
   });
   // Move one activity's deadline into the past (as the clock would).
-  await db.query(`update public.activities set expires_at = now() - interval '1 minute' where id = $1`, [pastId]);
+  await db.query(
+    `update public.activities set expires_at = now() - interval '1 minute' where id = $1`,
+    [pastId],
+  );
 
   await asUser(ids.alice, () =>
     assert.rejects(db.query(`select public.expire_due_activities()`), /permission denied/),
@@ -280,6 +318,41 @@ test('expire_due_activities expires past activities and clears their chat', asyn
   const byId = Object.fromEntries(statuses.rows.map((r) => [r.id, r.status]));
   assert.equal(byId[pastId], 'expired');
   assert.equal(byId[futureId], 'active');
-  const msgs = await one(`select count(*)::int as c from public.messages where activity_id = $1`, [pastId]);
+  const msgs = await one(`select count(*)::int as c from public.messages where activity_id = $1`, [
+    pastId,
+  ]);
   assert.equal(msgs.c, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Recommendation cache
+// ---------------------------------------------------------------------------
+
+test('only the service role can touch the recommendation cache', async () => {
+  await asUser(ids.alice, async () => {
+    await assert.rejects(db.query(`select * from public.pod_recommendations`), /permission denied/);
+    await assert.rejects(
+      db.query(
+        `insert into public.pod_recommendations (profile_id, signals_key, model) values ($1, 'k', 'm')`,
+        [ids.alice],
+      ),
+      /permission denied/,
+    );
+  });
+  await db.exec(`set role service_role`);
+  try {
+    await db.query(
+      `insert into public.pod_recommendations (profile_id, signals_key, model, recommendations)
+       values ($1, 'k', 'claude-opus-5-5', '[{"podId":"x","reason":"y","source":"claude"}]')
+       on conflict (profile_id) do update set signals_key = excluded.signals_key`,
+      [ids.alice],
+    );
+    const row = await one(
+      `select signals_key from public.pod_recommendations where profile_id = $1`,
+      [ids.alice],
+    );
+    assert.equal(row.signals_key, 'k');
+  } finally {
+    await db.exec(`reset role`);
+  }
 });
