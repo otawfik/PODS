@@ -3,6 +3,7 @@
 //   npm run eval:recs              heuristic baseline only (free, no network)
 //   npm run eval:recs -- --claude  also runs Claude (needs ANTHROPIC_API_KEY or
 //                                  an `ant auth login` profile; ~12 small calls)
+//   npm run eval:recs -- --claude --model claude-haiku-5-5   compare another model
 //
 // For each synthetic student it ranks the catalog exactly as the Edge Function
 // does (same pickCandidates / buildClaudeRequest / parseClaudeRanking), then
@@ -21,6 +22,7 @@ import {
   heuristicRank,
   parseClaudeRanking,
   pickCandidates,
+  RECOMMENDATION_MODEL,
   Recommendation,
   StudentSignals,
 } from '../supabase/functions/_shared/recommend';
@@ -91,10 +93,13 @@ function summarize(rows: Scores[]): Scores {
 
 async function rankWithClaude(
   client: Anthropic,
+  model: string,
   student: StudentSignals,
   candidates: CandidatePod[],
 ): Promise<Recommendation[]> {
-  const response = await client.beta.messages.create(buildClaudeRequest(student, candidates));
+  const response = await client.beta.messages.create(
+    buildClaudeRequest(student, candidates, model),
+  );
   if (response.stop_reason === 'refusal' || response.stop_reason === 'max_tokens') {
     console.warn(`  stop_reason=${response.stop_reason}`);
     return [];
@@ -107,10 +112,17 @@ const pct = (x: number) => `${(x * 100).toFixed(0)}%`.padStart(5);
 
 async function main() {
   const useClaude = process.argv.includes('--claude');
+  const modelFlag = process.argv.indexOf('--model');
+  const model = modelFlag > -1 ? process.argv[modelFlag + 1] : RECOMMENDATION_MODEL;
+  if (!model) throw new Error('--model needs a model id, e.g. claude-haiku-5-5');
   const client = useClaude ? new Anthropic() : null;
   const results: Record<string, Scores[]> = { heuristic: [], claude: [] };
 
-  console.log(`Eval: ${data.students.length} students, ${data.pods.length} pods\n`);
+  console.log(
+    `Eval: ${data.students.length} students, ${data.pods.length} pods` +
+      (client ? `, model ${model}` : '') +
+      '\n',
+  );
   for (const s of data.students) {
     const student = toSignals(s);
     const candidates = pickCandidates(student, data.pods);
@@ -120,7 +132,7 @@ async function main() {
 
     if (client) {
       try {
-        const recs = await rankWithClaude(client, student, candidates);
+        const recs = await rankWithClaude(client, model, student, candidates);
         const ids = recs.map((r) => r.podId);
         results.claude.push(score(ids, s.relevant));
         line += `   claude: ${ids.slice(0, 3).join(',')}`;

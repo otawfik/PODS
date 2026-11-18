@@ -34,6 +34,7 @@ export interface Recommendation {
   source: 'claude' | 'heuristic';
 }
 
+/** Default model. Override per deployment with the RECOMMENDATION_MODEL secret. */
 export const RECOMMENDATION_MODEL = 'claude-opus-5-5';
 export const MAX_CANDIDATES = 40;
 export const MAX_RESULTS = 5;
@@ -182,20 +183,34 @@ export function buildUserMessage(student: StudentSignals, candidates: CandidateP
 }
 
 /**
+ * Models that accept the server-side `fallbacks` parameter. Claude Haiku 5.5
+ * has no server-side fallback; a refusal there drops to the heuristic.
+ */
+export function supportsServerFallback(model: string): boolean {
+  return /^claude-(opus-5|sonnet-5-5|fable-5)/.test(model);
+}
+
+/**
  * Body for `client.beta.messages.create(...)`. Kept as a plain object so this
  * file needs no SDK import; callers pass it straight to the SDK.
  *
  * - Structured output (json_schema) guarantees parseable JSON.
  * - effort "low": ranking ≤40 short items doesn't need deep thinking.
- * - fallbacks "default": if Opus declines, the API retries on Anthropic's
- *   recommended fallback model instead of returning a refusal.
+ * - fallbacks "default" (models that support it): if the model declines, the
+ *   API retries on Anthropic's recommended fallback model instead of
+ *   returning a refusal.
  */
-export function buildClaudeRequest(student: StudentSignals, candidates: CandidatePod[]) {
+export function buildClaudeRequest(
+  student: StudentSignals,
+  candidates: CandidatePod[],
+  model: string = RECOMMENDATION_MODEL,
+) {
   return {
-    model: RECOMMENDATION_MODEL,
+    model,
     max_tokens: 4000,
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default' as const,
+    ...(supportsServerFallback(model)
+      ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const }
+      : {}),
     output_config: {
       effort: 'low' as const,
       format: { type: 'json_schema' as const, schema: RANKING_SCHEMA },
@@ -231,4 +246,55 @@ export function parseClaudeRanking(text: string, candidates: CandidatePod[]): Re
     if (out.length >= MAX_RESULTS) break;
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Per-student cache (table public.pod_recommendations)
+// ---------------------------------------------------------------------------
+
+/** Reuse a student's last ranking for this long if their signals are unchanged. */
+export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/** Minimum gap between two model calls for one student (cost guard). */
+export const RECOMPUTE_COOLDOWN_MS = 30 * 1000;
+
+export interface CachedRanking {
+  signalsKey: string;
+  createdAt: string;
+  recommendations: Recommendation[];
+}
+
+/**
+ * Canonical text of everything that should change the ranking. Order- and
+ * case-insensitive for interests and joined pods, so a reorder isn't a miss.
+ * New pods on campus don't invalidate it; they're picked up when it expires.
+ */
+export function signalsKey(student: StudentSignals, model: string): string {
+  return JSON.stringify([
+    model,
+    student.university.trim().toLowerCase(),
+    student.major.trim().toLowerCase(),
+    student.bio.trim().toLowerCase(),
+    [...new Set(student.interests.map((i) => i.trim().toLowerCase()))].sort(),
+    student.joinedPods.map((p) => p.podId).sort(),
+  ]);
+}
+
+/**
+ * - 'hit': same signals and younger than CACHE_TTL_MS → serve the cache.
+ * - 'cooldown': signals changed but the last model call was under
+ *   RECOMPUTE_COOLDOWN_MS ago → answer with the heuristic, don't call the model.
+ * - 'recompute': call the model and store the result.
+ */
+export function cacheDecision(
+  cached: CachedRanking | null,
+  key: string,
+  now: number,
+): 'hit' | 'cooldown' | 'recompute' {
+  if (!cached) return 'recompute';
+  const age = now - new Date(cached.createdAt).getTime();
+  if (!Number.isFinite(age) || age < 0) return 'recompute';
+  if (cached.signalsKey === key && age < CACHE_TTL_MS && cached.recommendations.length > 0) {
+    return 'hit';
+  }
+  return age < RECOMPUTE_COOLDOWN_MS ? 'cooldown' : 'recompute';
 }

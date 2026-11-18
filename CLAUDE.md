@@ -8,7 +8,7 @@ Sign-up is limited to `.edu` emails, verified with an emailed 6-digit code. A st
 
 - Expo SDK 57, React Native 0.86, React 19, TypeScript (strict), React Navigation 7 (native stack + bottom tabs)
 - Supabase: Postgres with Row Level Security; business rules as `SECURITY DEFINER` RPC functions in `supabase/migrations/`; Auth with emailed 6-digit codes plus a `before user created` hook (.edu only); Realtime for chat; `pg_cron` for activity expiry
-- Edge Functions (Deno) in `supabase/functions/`: `recommend-pods` calls Claude (`claude-opus-5-5`) via `@anthropic-ai/sdk`; `send-push` drains `notification_outbox` (filled by triggers on `activities`) to the Expo Push API
+- Edge Functions (Deno) in `supabase/functions/`: `recommend-pods` calls Claude via `@anthropic-ai/sdk` (default `claude-opus-5-5`, override with the `RECOMMENDATION_MODEL` secret) and caches per student in `public.pod_recommendations` (service role only). Pin `npm:` imports to versions at least ~2 weeks old: Deno blocks packages under 24 h old. `send-push` drains `notification_outbox` (filled by triggers on `activities`) to the Expo Push API
 - Push: `expo-notifications` (`src/services/notifications.ts`); needs an EAS dev build with a `projectId`, so it is skipped in Expo Go on Android, simulators and web
 
 ## Layout

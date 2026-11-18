@@ -5,19 +5,29 @@
 //
 // Runs on Deno at Supabase's edge. Deploy:
 //   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+//   supabase secrets set RECOMMENDATION_MODEL=claude-haiku-5-5   # optional
 //   supabase functions deploy recommend-pods
 //
-// Security: the database client is created with the caller's JWT, so Row
-// Level Security decides what the function can read (the same rows the app
-// can read). The Anthropic key never leaves the server.
+// Security: student data is read with the caller's JWT, so Row Level
+// Security decides what the function can read (the same rows the app can
+// read). Only the per-student cache table uses the service role key, which
+// the Edge runtime provides. The Anthropic key never leaves the server.
+//
+// Cost: each student's ranking is cached for 24 h (public.pod_recommendations)
+// and reused while their interests, major, bio and pods are unchanged; model
+// calls are at most one per student per 30 s.
 
 import { createClient } from 'npm:@supabase/supabase-js@2.117.3';
 import Anthropic from 'npm:@anthropic-ai/sdk@1.6.0';
 import {
   buildClaudeRequest,
+  cacheDecision,
   heuristicRank,
+  RECOMMENDATION_MODEL,
+  signalsKey,
   parseClaudeRanking,
   pickCandidates,
+  type CachedRanking,
   type CandidatePod,
   type Recommendation,
   type StudentSignals,
@@ -53,14 +63,21 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function rankWithClaude(
+  apiKey: string,
+  model: string,
   student: StudentSignals,
   candidates: CandidatePod[],
 ): Promise<Recommendation[]> {
-  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
-  if (!apiKey) return [];
   const client = new Anthropic({ apiKey, timeout: 25_000, maxRetries: 1 });
-  const response = await client.beta.messages.create(buildClaudeRequest(student, candidates));
+  const response = await client.beta.messages.create(
+    buildClaudeRequest(student, candidates, model),
+  );
   if (response.stop_reason === 'refusal' || response.stop_reason === 'max_tokens') {
     console.warn('recommend-pods: unusable stop_reason', response.stop_reason);
     return [];
@@ -122,15 +139,59 @@ Deno.serve(async (req) => {
   const candidates = pickCandidates(student, pool);
   if (candidates.length === 0) return json({ recommendations: [], source: 'none' });
 
-  // --- Rank: Claude first, heuristic fallback ------------------------------
+  // --- Rank: cache → Claude → heuristic ----------------------------------
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (!apiKey) {
+    return json({ recommendations: heuristicRank(student, candidates), source: 'heuristic' });
+  }
+  const model = Deno.env.get('RECOMMENDATION_MODEL') || RECOMMENDATION_MODEL;
+  const offered = new Set(candidates.map((c) => c.podId));
+  const key = await sha256(signalsKey(student, model));
+
+  const admin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  );
+  const { data: cacheRow, error: cacheError } = await admin
+    .from('pod_recommendations')
+    .select('signals_key, created_at, recommendations')
+    .eq('profile_id', auth.user.id)
+    .maybeSingle();
+  if (cacheError) console.error('recommend-pods: cache read failed', cacheError.message);
+  const cached: CachedRanking | null = cacheRow
+    ? {
+        signalsKey: cacheRow.signals_key,
+        createdAt: cacheRow.created_at,
+        recommendations: cacheRow.recommendations ?? [],
+      }
+    : null;
+
+  const decision = cacheDecision(cached, key, Date.now());
+  if (decision === 'hit' && cached) {
+    // Drop pods that were deleted, went private or were joined since.
+    const still = cached.recommendations.filter((r) => offered.has(r.podId));
+    if (still.length) return json({ recommendations: still, source: 'claude', cached: true });
+  }
+
   let recommendations: Recommendation[] = [];
-  try {
-    recommendations = await rankWithClaude(student, candidates);
-  } catch (err) {
-    if (err instanceof Anthropic.RateLimitError) console.warn('recommend-pods: rate limited');
-    else if (err instanceof Anthropic.APIError)
-      console.error('recommend-pods: API error', err.status, err.message);
-    else console.error('recommend-pods: unexpected error', err);
+  if (decision === 'recompute') {
+    try {
+      recommendations = await rankWithClaude(apiKey, model, student, candidates);
+    } catch (err) {
+      if (err instanceof Anthropic.RateLimitError) console.warn('recommend-pods: rate limited');
+      else if (err instanceof Anthropic.APIError)
+        console.error('recommend-pods: API error', err.status, err.message);
+      else console.error('recommend-pods: unexpected error', err);
+    }
+    // Record every model attempt (even an empty one) so the cooldown applies.
+    const { error: writeError } = await admin.from('pod_recommendations').upsert({
+      profile_id: auth.user.id,
+      signals_key: key,
+      model,
+      recommendations,
+      created_at: new Date().toISOString(),
+    });
+    if (writeError) console.error('recommend-pods: cache write failed', writeError.message);
   }
   if (recommendations.length === 0) recommendations = heuristicRank(student, candidates);
 
