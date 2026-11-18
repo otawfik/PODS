@@ -9,9 +9,11 @@ interface Props {
   isMember?: boolean;
   onPress: () => void;
   onJoin?: () => void;
+  /** Why this pod was recommended (shown as a highlighted line). */
+  reason?: string;
 }
 
-export default function PodCard({ pod, isMember = false, onPress, onJoin }: Props) {
+export default function PodCard({ pod, isMember = false, onPress, onJoin, reason }: Props) {
   const { colors } = useTheme();
   const accentColor = CategoryColors[pod.category] ?? colors.primary;
 
@@ -33,6 +35,13 @@ export default function PodCard({ pod, isMember = false, onPress, onJoin }: Prop
         <Text style={[styles.description, { color: colors.subtext }]} numberOfLines={2}>
           {pod.description}
         </Text>
+        {reason ? (
+          <View style={[styles.reasonBox, { backgroundColor: colors.primaryGlow }]}>
+            <Text style={[styles.reasonText, { color: colors.primary }]} numberOfLines={2}>
+              ✨ {reason}
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.footer}>
           <Text style={[styles.members, { color: colors.subtext }]}>{pod.memberCount} members</Text>
           {!isMember && onJoin && (
@@ -70,6 +79,8 @@ const styles = StyleSheet.create({
   category: { fontSize: 12, fontWeight: '500' },
   name: { fontSize: 18, fontWeight: '700', marginBottom: 4 },
   description: { fontSize: 13, lineHeight: 18, marginBottom: 12 },
+  reasonBox: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 12 },
+  reasonText: { fontSize: 12, fontWeight: '600', lineHeight: 16 },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   members: { fontSize: 13 },
   joinBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20 },

@@ -36,6 +36,30 @@ export const PREDEFINED_TAGS: string[] = [
   'Paid',
 ];
 
+/** Suggested interest chips on the profile. Users can also type their own. */
+export const INTEREST_SUGGESTIONS: string[] = [
+  'Basketball',
+  'Soccer',
+  'Running',
+  'Climbing',
+  'Gym',
+  'Yoga',
+  'Study groups',
+  'Coding',
+  'Hackathons',
+  'Pre-med',
+  'Startups',
+  'Board games',
+  'Video games',
+  'Cooking',
+  'Coffee',
+  'Music',
+  'Photography',
+  'Film',
+  'Hiking',
+  'Volunteering',
+];
+
 export const UNIVERSITY_DOMAINS: Record<string, string> = {
   'bu.edu': 'Boston University',
   'mit.edu': 'MIT',
@@ -70,10 +94,21 @@ export const UNIVERSITY_DOMAINS: Record<string, string> = {
   'northeastern.edu': 'Northeastern University',
 };
 
+/**
+ * 'jo@cs.bu.edu' → 'Boston University' (longest matching domain suffix);
+ * unknown 'jo@foo.edu' → 'FOO University'. Display only: the server derives
+ * the stored value with the same rules (public.university_for_email).
+ */
 export function getUniversityFromEmail(email: string): string {
   const domain = email.split('@')[1]?.toLowerCase();
   if (!domain) return 'Unknown University';
-  return UNIVERSITY_DOMAINS[domain] ?? `${domain.split('.')[0].toUpperCase()} University`;
+  const labels = domain.split('.');
+  for (let i = 0; i < labels.length; i++) {
+    const name = UNIVERSITY_DOMAINS[labels.slice(i).join('.')];
+    if (name) return name;
+  }
+  const label = labels.length >= 2 ? labels[labels.length - 2] : labels[0];
+  return `${label.toUpperCase()} University`;
 }
 
 export function isEduEmail(email: string): boolean {
