@@ -8,7 +8,8 @@ Sign-up is limited to `.edu` emails, verified with an emailed 6-digit code. A st
 
 - Expo SDK 57, React Native 0.86, React 19, TypeScript (strict), React Navigation 7 (native stack + bottom tabs)
 - Supabase: Postgres with Row Level Security; business rules as `SECURITY DEFINER` RPC functions in `supabase/migrations/`; Auth with emailed 6-digit codes plus a `before user created` hook (.edu only); Realtime for chat; `pg_cron` for activity expiry
-- Edge Functions (Deno) in `supabase/functions/`: `recommend-pods` calls Claude (`claude-opus-5-5`) via `@anthropic-ai/sdk`
+- Edge Functions (Deno) in `supabase/functions/`: `recommend-pods` calls Claude (`claude-opus-5-5`) via `@anthropic-ai/sdk`; `send-push` drains `notification_outbox` (filled by triggers on `activities`) to the Expo Push API
+- Push: `expo-notifications` (`src/services/notifications.ts`); needs an EAS dev build with a `projectId`, so it is skipped in Expo Go on Android, simulators and web
 
 ## Layout
 
@@ -56,6 +57,6 @@ npm run eval:recs           # recommendation eval (add -- --claude to include th
 - No raw hex colors outside `src/constants/colors.ts` (becoming `src/theme/` in Phase 3).
 - Every new screen handles loading, empty and error states.
 - Business rules live in the backend (RLS + RPC), never only in the client. Clients may update only `profiles.display_name, bio, profile_photo, major, interests`; identity columns (`email`, `university`, counters, `pods_joined`) are server-owned.
-- Schema changes are new numbered migration files, never edits to applied ones. Add a test to `supabase/tests/db.test.mjs` for any new policy or RPC. New `public` functions get EXECUTE granted to `anon`/`authenticated` by Supabase default, so revoke explicitly when they are internal.
-- Secrets (`ANTHROPIC_API_KEY`, service role key) live only in Supabase function secrets, never in `.env` or app code.
+- Schema changes are new numbered migration files, never edits to applied ones. Add a test to `supabase/tests/*.test.mjs` (e.g. `db.test.mjs`, `push.test.mjs`) for any new policy or RPC. New `public` functions get EXECUTE granted to `anon`/`authenticated` by Supabase default, so revoke explicitly when they are internal.
+- Secrets (`ANTHROPIC_API_KEY`, `PUSH_WEBHOOK_SECRET`, `EXPO_ACCESS_TOKEN`, service role key) live only in Supabase function secrets (and the push webhook secret also in Supabase Vault for `pg_net`), never in `.env` or app code.
 - Keep PRs under ~400 lines. Run `npm run lint && npm run typecheck && npm test && npm run test:db` before opening one.

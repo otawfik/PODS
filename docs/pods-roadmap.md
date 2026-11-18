@@ -188,7 +188,7 @@ Goal: a secure backend with the real data model, verification, expiry, chat, pus
 6. **Expiry.** `pg_cron` job every minute: mark activities `expired` when `expires_at < now()`, mark their pending `join_requests` as `expired`, lock their chat; an hourly job deletes messages from rooms expired > 24 h (the chat then disappears from inbox and detail); expired activities themselves are kept 30 days for the moderation window, then pruned. Activities are editable by the host only while `starts_at > now()` (enforced in the update RPC). *(Today: expiry happens lazily via `expire_activity_if_needed`, and the chat is deleted immediately rather than after 24 h.)*
 7. **Realtime.** Enable Realtime on `messages`, `join_requests`, `activity_participants` so chat, pending badges, and spot counts update live.
 8. **Storage.** `avatars` bucket, public-read, write restricted to own path; images resized on the client before upload (~512 px).
-9. **Push.** Table triggers → `pg_net` HTTP call to an Edge Function → Expo Push API. Events: new join request (to host), request decided (to requester), new activity in a pod you're in (respecting `pod_members.muted` — per-pod mute is in), new message in an activity chat when app is backgrounded.
+9. **Push.** Table triggers → `pg_net` HTTP call to an Edge Function → Expo Push API. Events: new join request (to host), request decided (to requester), new activity in a pod you're in (respecting `pod_members.muted` — per-pod mute is in), new message in an activity chat when app is backgrounded. *(Nov 18: done except chat messages and per-pod mute — triggers on `activities` → `notification_outbox` → `pg_net` → `send-push` → Expo; see README.)*
 10. **Seed & test data.** A seed script creating BU, ~8 pods, ~20 fake users, activities in every state, so the UI can be built against realistic data.
 11. **Delete the Firebase project** once the app no longer references it. *(The app no longer references it as of Oct 9 — delete now.)*
 
@@ -211,7 +211,7 @@ Goal: every screen rebuilt on the new components, talking to Supabase, with load
 4. **Navigation restructure** to the new IA (Home / Pods / Create / Inbox / Profile), single definition of shared screens, typed routes, deep-link config (`pods://activity/123`) so push notifications open the right screen.
 5. **Screens**, in dependency order: Home feed (My Pods / Campus segments) → Activity detail → Create activity (pod or campus) → Join requests → Pods list → Explore → Pod detail (public preview for non-members) → Create pod → Pod settings (member posting toggle, mute, admin role labels, remove member) → Chat (incl. ended state) → Inbox → Profile → Edit profile → Other-user profile → Report sheet → Settings/blocked users.
 6. **Realtime wiring:** chat (*done for the current screens*), pending badge, spot counts.
-7. **Push registration** on first launch after login (ask permission at a moment that makes sense — after the first join request, not on the welcome screen).
+7. **Push registration** on first launch after login (ask permission at a moment that makes sense — after the first join request, not on the welcome screen). *(Nov 18: done in `src/services/notifications.ts`; tap-to-open needs the deep-link config from step 4.)*
 8. **Error & offline handling:** global error boundary, toast for failures, retry on network error, "you're offline" banner.
 9. **Accessibility pass:** labels on icon buttons, 44 pt touch targets, Dynamic Type doesn't break layouts, contrast ≥ 4.5:1 (checked from the tokens).
 
