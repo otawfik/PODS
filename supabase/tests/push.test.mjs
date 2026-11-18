@@ -26,8 +26,10 @@ before(async () => {
   await t.signUp(ids.other, 'olga@bu.edu', { display_name: 'Olga' });
   await t.signUp(ids.outsider, 'oscar@bu.edu', { display_name: 'Oscar' });
 
-  podId = await t.asUser(ids.host, async () =>
-    (await t.one(`select public.create_pod('Climbing', '', 'Sports', 'public', null) as id`)).id,
+  podId = await t.asUser(
+    ids.host,
+    async () =>
+      (await t.one(`select public.create_pod('Climbing', '', 'Sports', 'public', null) as id`)).id,
   );
   for (const uid of [ids.member, ids.other]) {
     await t.asUser(uid, () => t.db.query(`select public.join_pod($1)`, [podId]));
@@ -52,12 +54,16 @@ async function outbox() {
 }
 
 async function createActivity(autoApprove = false, title = 'Bouldering') {
-  return t.asUser(ids.host, async () =>
-    (await t.one(
-      `select public.create_activity($1, 'Hana', $2, 'Sports', '{}',
+  return t.asUser(
+    ids.host,
+    async () =>
+      (
+        await t.one(
+          `select public.create_activity($1, 'Hana', $2, 'Sports', '{}',
          now() + interval '1 hour', now() + interval '3 hours', 5, 'university', $3) as id`,
-      [podId, title, autoApprove],
-    )).id,
+          [podId, title, autoApprove],
+        )
+      ).id,
   );
 }
 
@@ -71,22 +77,30 @@ test('users register, read and unregister only their own tokens', async () => {
   await rpc(ids.member, `select public.register_push_token($1, 'ios')`, [TOKEN('milo-phone')]);
   await rpc(ids.other, `select public.register_push_token($1, 'android')`, [TOKEN('olga-phone')]);
 
-  const mine = await t.asUser(ids.member, () => t.db.query(`select token, platform from public.push_tokens`));
-  assert.deepEqual(mine.rows, [{ token: TOKEN('milo-phone'), platform: 'ios' }], 'sees only own token');
+  const mine = await t.asUser(ids.member, () =>
+    t.db.query(`select token, platform from public.push_tokens`),
+  );
+  assert.deepEqual(
+    mine.rows,
+    [{ token: TOKEN('milo-phone'), platform: 'ios' }],
+    'sees only own token',
+  );
 
   // No direct writes; unregistering someone else's token does nothing.
   await t.asUser(ids.member, async () => {
     await assert.rejects(
-      t.db.query(`insert into public.push_tokens (token, profile_id, platform) values ($1, $2, 'ios')`, [
-        TOKEN('x'),
-        ids.member,
-      ]),
+      t.db.query(
+        `insert into public.push_tokens (token, profile_id, platform) values ($1, $2, 'ios')`,
+        [TOKEN('x'), ids.member],
+      ),
       /permission denied/,
     );
     await assert.rejects(t.db.query(`delete from public.push_tokens`), /permission denied/);
     await t.db.query(`select public.unregister_push_token($1)`, [TOKEN('olga-phone')]);
   });
-  const olga = await t.one(`select profile_id from public.push_tokens where token = $1`, [TOKEN('olga-phone')]);
+  const olga = await t.one(`select profile_id from public.push_tokens where token = $1`, [
+    TOKEN('olga-phone'),
+  ]);
   assert.equal(olga.profile_id, ids.other);
 
   await rpc(ids.member, `select public.unregister_push_token($1)`, [TOKEN('milo-phone')]);
@@ -99,11 +113,16 @@ test('users register, read and unregister only their own tokens', async () => {
 test('a token moves to whoever registers it last; bad input is rejected', async () => {
   await rpc(ids.member, `select public.register_push_token($1, 'ios')`, [TOKEN('shared')]);
   await rpc(ids.other, `select public.register_push_token($1, 'ios')`, [TOKEN('shared')]);
-  const row = await t.one(`select profile_id from public.push_tokens where token = $1`, [TOKEN('shared')]);
+  const row = await t.one(`select profile_id from public.push_tokens where token = $1`, [
+    TOKEN('shared'),
+  ]);
   assert.equal(row.profile_id, ids.other);
 
   await t.asUser(ids.member, async () => {
-    await assert.rejects(t.db.query(`select public.register_push_token('not-a-token', 'ios')`), /Invalid push token/);
+    await assert.rejects(
+      t.db.query(`select public.register_push_token('not-a-token', 'ios')`),
+      /Invalid push token/,
+    );
     await assert.rejects(
       t.db.query(`select public.register_push_token($1, 'web')`, [TOKEN('w')]),
       /Invalid platform/,
@@ -119,9 +138,13 @@ test('a token moves to whoever registers it last; bad input is rejected', async 
 
 test('each user keeps at most 10 devices', async () => {
   for (let i = 0; i < 12; i++) {
-    await rpc(ids.outsider, `select public.register_push_token($1, 'android')`, [TOKEN(`dev-${i}`)]);
+    await rpc(ids.outsider, `select public.register_push_token($1, 'android')`, [
+      TOKEN(`dev-${i}`),
+    ]);
   }
-  const { rows } = await t.db.query(`select token from public.push_tokens where profile_id = $1`, [ids.outsider]);
+  const { rows } = await t.db.query(`select token from public.push_tokens where profile_id = $1`, [
+    ids.outsider,
+  ]);
   assert.equal(rows.length, 10);
   assert.ok(!rows.some((r) => r.token === TOKEN('dev-0')), 'oldest device dropped');
   await t.db.query(`delete from public.push_tokens where profile_id = $1`, [ids.outsider]);
@@ -200,7 +223,10 @@ test('auto-approve joins notify the host; leaving and expiry are silent', async 
 
   await t.db.exec(`delete from public.notification_outbox`);
   await rpc(ids.outsider, `select public.leave_activity($1)`, [actId]);
-  await t.db.query(`update public.activities set expires_at = now() - interval '1 minute' where id = $1`, [actId]);
+  await t.db.query(
+    `update public.activities set expires_at = now() - interval '1 minute' where id = $1`,
+    [actId],
+  );
   await t.db.query(`select public.expire_due_activities()`);
   rows = await outbox();
   assert.deepEqual(rows, []);
@@ -227,11 +253,20 @@ test('a broken outbox never rolls back the join request', async () => {
 test('clients cannot read the outbox or call the delivery functions', async () => {
   await createActivity();
   await t.asUser(ids.member, async () => {
-    await assert.rejects(t.db.query(`select * from public.notification_outbox`), /permission denied/);
-    await assert.rejects(t.db.query(`select * from public.claim_push_notifications(10)`), /permission denied/);
+    await assert.rejects(
+      t.db.query(`select * from public.notification_outbox`),
+      /permission denied/,
+    );
+    await assert.rejects(
+      t.db.query(`select * from public.claim_push_notifications(10)`),
+      /permission denied/,
+    );
     await assert.rejects(t.db.query(`select public.kick_push_delivery()`), /permission denied/);
     await assert.rejects(
-      t.db.query(`select public._enqueue_notification('join_request', null, null, null, $1, '{}')`, [[ids.member]]),
+      t.db.query(
+        `select public._enqueue_notification('join_request', null, null, null, $1, '{}')`,
+        [[ids.member]],
+      ),
       /permission denied/,
     );
   });
@@ -247,23 +282,34 @@ test('claim_push_notifications leases pending rows with their recipients tokens'
   // Without pg_net/vault (as here) the kick is a quiet no-op.
   await t.db.query(`select public.kick_push_delivery()`);
 
-  const claimed = await t.asService(() => t.db.query(`select * from public.claim_push_notifications(10)`));
+  const claimed = await t.asService(() =>
+    t.db.query(`select * from public.claim_push_notifications(10)`),
+  );
   assert.equal(claimed.rows.length, 1);
   const [row] = claimed.rows;
   assert.equal(row.type, 'new_activity');
   assert.equal(row.activity_id, actId);
-  assert.deepEqual(row.tokens, [TOKEN('milo-1'), TOKEN('milo-2')], "host's own token is not included");
+  assert.deepEqual(
+    row.tokens,
+    [TOKEN('milo-1'), TOKEN('milo-2')],
+    "host's own token is not included",
+  );
 
-  const again = await t.asService(() => t.db.query(`select * from public.claim_push_notifications(10)`));
+  const again = await t.asService(() =>
+    t.db.query(`select * from public.claim_push_notifications(10)`),
+  );
   assert.equal(again.rows.length, 0, 'leased rows are not handed out twice');
 
   // The function marks rows sent and removes dead tokens with the service role.
   await t.asService(async () => {
-    await t.db.query(`update public.notification_outbox set sent_at = now() where id = $1`, [row.id]);
+    await t.db.query(`update public.notification_outbox set sent_at = now() where id = $1`, [
+      row.id,
+    ]);
     await t.db.query(`delete from public.push_tokens where token = $1`, [TOKEN('milo-2')]);
   });
-  const state = await t.one(`select attempts, sent_at is not null as sent from public.notification_outbox where id = $1`, [
-    row.id,
-  ]);
+  const state = await t.one(
+    `select attempts, sent_at is not null as sent from public.notification_outbox where id = $1`,
+    [row.id],
+  );
   assert.deepEqual(state, { attempts: 1, sent: true });
 });
