@@ -1,5 +1,6 @@
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase, check } from './supabase';
+import { unregisterPushToken } from './notifications';
 import { User } from '../types';
 
 // ---------- Row mapping (Postgres snake_case <-> app camelCase) ----------
@@ -99,6 +100,8 @@ export async function loginUser(email: string, password: string): Promise<void> 
 }
 
 export async function logoutUser(): Promise<void> {
+  // While still signed in: stop pushes for this account on this device.
+  await unregisterPushToken();
   const { error } = await supabase.auth.signOut();
   if (error) throw new Error(error.message);
 }

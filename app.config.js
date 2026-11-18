@@ -7,7 +7,7 @@ export default {
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
-    plugins: ["expo-status-bar"],
+    plugins: ["expo-status-bar", "expo-notifications"],
     userInterfaceStyle: "automatic",
     splash: {
       image: "./assets/splash-icon.png",

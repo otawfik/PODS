@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '../services/supabase';
 import { ensureUserProfile, getUserProfile } from '../services/auth';
+import { registerForPushNotifications } from '../services/notifications';
 import { User } from '../types';
 
 interface AuthContextType {
@@ -64,6 +65,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const profile = await ensureUserProfile(user);
         loadedUserId.current = user.id;
         setUserProfile(profile);
+        // Refresh this device's push token if permission was granted before.
+        // Never prompts here; see askForPushAfterAction.
+        void registerForPushNotifications({ prompt: false });
       } catch (err) {
         console.warn('Could not load profile', err);
       } finally {
