@@ -5,6 +5,9 @@ import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from './src/context/AuthContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import RootNavigator from './src/navigation/RootNavigator';
+import { configureForegroundNotifications } from './src/services/notifications';
+
+configureForegroundNotifications();
 
 function AppContent() {
   const { isDark } = useTheme();

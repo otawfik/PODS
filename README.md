@@ -105,6 +105,19 @@ npx expo start
    ```
    Without the key the function still works and uses the keyword ranker (free).
    To use a cheaper model: `supabase secrets set RECOMMENDATION_MODEL=claude-haiku-5-5`.
+4. Push notifications. The migration turns on `pg_net` and `pg_cron`; pick a random secret, then:
+   ```sql
+   -- SQL Editor
+   select vault.create_secret('https://<project-ref>.supabase.co', 'project_url');
+   select vault.create_secret('<random secret>', 'push_webhook_secret');
+   ```
+   ```bash
+   supabase secrets set PUSH_WEBHOOK_SECRET=<same random secret>
+   # optional, only if "Enhanced push security" is on in Expo:
+   supabase secrets set EXPO_ACCESS_TOKEN=...
+   supabase functions deploy send-push --no-verify-jwt
+   ```
+   Until the vault secrets exist, events wait in `notification_outbox` (pruned after 7 days). Devices only get a token in a development/production build with an EAS `projectId`.
 
 ---
 
@@ -126,14 +139,30 @@ App (PodDiscoveryScreen)
 - Claude gets no names or emails, only interests, major, bio, university and pod text. Pod descriptions are user-written, so the prompt treats them as data, and the output is checked against the candidate ids.
 - **Eval:** `npm run eval:recs` scores the rankers on 12 labelled synthetic students and 30 pods (hit@3, precision@3, recall@5, MRR, and whether a prompt-injection pod gets recommended). Add `-- --claude` with `ANTHROPIC_API_KEY` set to include the LLM, and `--model claude-haiku-5-5` to compare models. Current keyword baseline: hit@3 75%, precision@3 33%, MRR 0.64.
 
+## How push notifications work
+
+```
+request / approve / decline / create activity (RPCs)
+  └─ AFTER trigger on activities diffs the request/participant arrays
+       └─ notification_outbox row (type, activity, recipients, text)   never rolls back the action
+            └─ pg_net POST (after commit; pg_cron retries every minute) → send-push Edge Function
+                 1. claim_push_notifications(): lease pending rows + recipients' tokens
+                 2. build messages, batches of ≤100 → Expo Push API
+                 3. delete DeviceNotRegistered tokens, mark rows sent (failed requests retry, max 5)
+```
+
+- Events: join request → host; auto-approve join → host; approved / declined → requester; new activity → the other pod members. Nobody is notified about their own action.
+- Code: `supabase/migrations/20261118000100_push_notifications.sql`, `supabase/functions/send-push/index.ts`, `supabase/functions/_shared/push.ts` (message text, batching, tickets), `src/services/notifications.ts` (permission + token).
+- The app asks for permission after the first join request or created activity, and removes the device's token on sign-out. Notification `data` is `{ type, activityId, podId }` for deep links later.
+
 ---
 
 ## Testing
 
 ```bash
 npm run lint && npm run typecheck   # static checks
-npm test                            # Jest: components, recommendation logic, helpers
-npm run test:db                     # every migration on PGlite + RLS / RPC / hook / cron tests
+npm test                            # Jest: components, recommendation + push logic, helpers
+npm run test:db                     # every migration on PGlite + RLS / RPC / hook / cron / push tests
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of these plus a Deno type-check of the Edge Functions on every PR.
@@ -162,7 +191,7 @@ scripts/         Recommendation eval
 
 ## Roadmap
 
-- Push notifications for activity reminders and new messages
+- Push notifications for activity reminders and new chat messages
 - Location-based Pod discovery ("what's happening near me")
 - Recurring activities and RSVP headcounts
 - Pod ratings and member reputation
