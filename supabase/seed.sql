@@ -219,10 +219,14 @@ begin
   perform pg_temp.seed_request(a, array[4, 5]);
   perform pg_temp.seed_approve(a, 3, array[4]);
 
-  -- CS 411: yesterday's session (expired below).
+  -- CS 411: yesterday's session (expired below). People can only join an
+  -- activity that hasn't ended, so it is filled first and then moved to the past.
   a := pg_temp.seed_activity(1, cs, 'PS3 work session', 'Study', '{Study Group}',
-                             '-1 day', '-21 hours', 5, 'pod', true);
+                             '1 hour', '4 hours', 5, 'pod', true);
   perform pg_temp.seed_request(a, array[2, 4]);
+  update public.activities
+     set start_time = now() - interval '1 day', expires_at = now() - interval '21 hours'
+   where id = a;
 
   -- Basketball: campus-wide, one spot left.
   a := pg_temp.seed_activity(5, hoops, '3v3 at FitRec, court 2', 'Sports', '{Casual,Indoor,Evening}',
@@ -244,8 +248,11 @@ begin
 
   -- Food: yesterday's lunch (expired below).
   a := pg_temp.seed_activity(9, food, 'Lunch at Warren dining hall', 'Food', '{Casual}',
-                             '-26 hours', '-24 hours', 4, 'pod', true);
+                             '1 hour', '3 hours', 4, 'pod', true);
   perform pg_temp.seed_request(a, array[8]);
+  update public.activities
+     set start_time = now() - interval '26 hours', expires_at = now() - interval '24 hours'
+   where id = a;
 
   -- Gaming: tonight, auto-approve.
   a := pg_temp.seed_activity(10, gaming, 'Smash bracket night', 'Social', '{Competitive,Late Night,Free}',

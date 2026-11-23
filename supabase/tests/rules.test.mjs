@@ -461,40 +461,32 @@ test('chat is readable and writable only by the people in the room', async () =>
 });
 
 // ---------------------------------------------------------------------------
-// Known gaps. These describe behaviour the RPCs should have but do not yet;
-// they are marked todo so they report without failing the run. Fix each in a
-// new migration and drop the `todo`.
+// Guards added in 20261123000300_rpc_guards.sql (these were gaps this file found).
 // ---------------------------------------------------------------------------
 
-test(
-  'an expired activity accepts no new join requests',
-  { todo: 'request_join_activity ignores status' },
-  async () => {
-    const podId = await createPod(ids.alice, 'Gap: expired');
-    await rpc(ids.bob, `join_pod($1)`, [podId]);
-    const actId = await createActivity(ids.alice, podId, { auto: true });
-    await db.query(
-      `update public.activities set status = 'expired', expires_at = now() - interval '1 hour' where id = $1`,
-      [actId],
-    );
-    await assert.rejects(rpc(ids.bob, `request_join_activity($1)`, [actId]));
-  },
-);
+test('an expired activity accepts no new join requests', async () => {
+  const podId = await createPod(ids.alice, 'Gap: expired');
+  await rpc(ids.bob, `join_pod($1)`, [podId]);
+  const actId = await createActivity(ids.alice, podId, { auto: true });
+  await db.query(
+    `update public.activities set status = 'expired', expires_at = now() - interval '1 hour' where id = $1`,
+    [actId],
+  );
+  await assert.rejects(rpc(ids.bob, `request_join_activity($1)`, [actId]), /has ended/);
+});
 
-test(
-  'admin can only be granted to a pod member',
-  { todo: 'grant_pod_admin does not check membership' },
-  async () => {
-    const podId = await createPod(ids.alice, 'Gap: outsider admin');
-    await assert.rejects(rpc(ids.alice, `grant_pod_admin($1, $2)`, [podId, ids.dave]));
-  },
-);
+test('admin can only be granted to a pod member', async () => {
+  const podId = await createPod(ids.alice, 'Gap: outsider admin');
+  await assert.rejects(
+    rpc(ids.alice, `grant_pod_admin($1, $2)`, [podId, ids.dave]),
+    /Only pod members/,
+  );
+});
 
-test(
-  'a pod always keeps at least one admin',
-  { todo: 'remove_pod_admin can remove the last admin' },
-  async () => {
-    const podId = await createPod(ids.alice, 'Gap: no admins');
-    await assert.rejects(rpc(ids.alice, `remove_pod_admin($1, $2)`, [podId, ids.alice]));
-  },
-);
+test('a pod always keeps at least one admin', async () => {
+  const podId = await createPod(ids.alice, 'Gap: no admins');
+  await assert.rejects(
+    rpc(ids.alice, `remove_pod_admin($1, $2)`, [podId, ids.alice]),
+    /at least one admin/,
+  );
+});
