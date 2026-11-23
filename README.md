@@ -151,9 +151,12 @@ request / approve / decline / create activity (RPCs)
                  3. delete DeviceNotRegistered tokens, mark rows sent (failed requests retry, max 5)
 ```
 
-- Events: join request → host; auto-approve join → host; approved / declined → requester; new activity → the other pod members. Nobody is notified about their own action.
-- Code: `supabase/migrations/20261118000100_push_notifications.sql`, `supabase/functions/send-push/index.ts`, `supabase/functions/_shared/push.ts` (message text, batching, tickets), `src/services/notifications.ts` (permission + token).
-- The app asks for permission after the first join request or created activity, and removes the device's token on sign-out. Notification `data` is `{ type, activityId, podId }` for deep links later.
+- Events: join request → host; auto-approve join → host; approved / declined → requester; new activity → the other pod members; chat message → the other people in that chat (activity participants, or pod members). Nobody is notified about their own action.
+- **Chat pushes are collapsed** so a busy chat doesn't buzz for every message: a person gets no new chat notification for a room while they already have one for that room that is still waiting to be sent or was queued in the last 2 minutes. The push shows the sender and the first 100 characters of the first message of that burst. While that chat is open on screen, its pushes are not shown at all.
+- **Mute:** the Info tab of a pod has a "Mute notifications" switch (`pod_mutes` table, `set_pod_mute` RPC). A muted pod sends you no new-activity or pod-chat pushes. Join requests to you, decisions on your requests and the chats of activities you joined still arrive.
+- **Tapping a notification** opens the matching screen through the deep-link table in `src/navigation/linking.ts`: `pods://activity/<id>` (activity), `pods://pod/<id>` (pod, on its chat), `pods://chat/<activityId>` (activity chat). If you are signed out, the link waits and opens after you sign in (`src/navigation/useDeepLinks.ts`). The `pods://` scheme works in development/production builds, not in Expo Go.
+- Code: `supabase/migrations/20261118000100_push_notifications.sql` and `20261123000200_chat_push_and_mute.sql`, `supabase/functions/send-push/index.ts`, `supabase/functions/_shared/push.ts` (message text, batching, tickets), `src/services/notifications.ts` (permission, token, taps).
+- The app asks for permission after the first join request or created activity, and removes the device's token on sign-out. Notification `data` is `{ type, activityId, podId }`; the app maps it to a screen.
 
 ---
 
