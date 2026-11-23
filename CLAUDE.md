@@ -24,7 +24,8 @@ src/
 supabase/
   migrations/   Numbered SQL migrations (schema, RLS, RPCs, hooks, cron)
   functions/    Edge Functions; _shared/ holds runtime-agnostic code (no imports)
-  tests/        Database tests (PGlite: real Postgres in WASM, no Docker)
+  tests/        Database tests (PGlite: real Postgres in WASM, no Docker); helpers.mjs has the shared setup
+  seed.sql      Demo data for development projects (re-runnable; tested by tests/seed.test.mjs)
 scripts/        eval-recommendations.ts + eval-data/
 __tests__/      Jest tests (jest-expo)
 ```
@@ -37,7 +38,7 @@ npx expo start -c           # run the app (Expo Go / web)
 npm run lint                # ESLint (eslint-config-expo + prettier)
 npm run typecheck           # tsc --noEmit (excludes Deno function entry points)
 npm test                    # Jest unit/component tests
-npm run test:db             # apply all migrations to PGlite, test RLS/RPCs/hook/cron
+npm run test:db             # apply all migrations to PGlite, test RLS/RPCs/hook/cron and seed.sql
 npm run eval:recs           # recommendation eval (add -- --claude to include the LLM)
 (cd supabase/functions && npx deno@2 check */index.ts)   # type-check Edge Functions
 (cd supabase/functions && npx deno@2 test --allow-env)   # run Edge Function handlers (fetch stubbed)

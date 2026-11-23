@@ -106,6 +106,10 @@ npx expo start
    Without the key the function still works and uses the keyword ranker (free).
    To use a cheaper model: `supabase secrets set RECOMMENDATION_MODEL=claude-haiku-5-5`.
 
+### Demo data (development projects only)
+
+`supabase/seed.sql` fills a project with 20 students, 8 pods (one private, invite code `SEEDFM`) and activities in every state (open, pending requests, full, auto-approve, started, campus-wide, expired), plus some chat. Paste it into the SQL Editor after the migrations. It is safe to re-run: it replaces its own data and touches nothing else, and since times are relative to "now", re-running refreshes activities that have expired. Seed students cannot sign in; sign up with a `@bu.edu` address to see the Boston University data. Do not run it on the project real students use.
+
 ---
 
 ## How recommendations work
@@ -132,8 +136,8 @@ App (PodDiscoveryScreen)
 
 ```bash
 npm run lint && npm run typecheck   # static checks
-npm test                            # Jest: components, recommendation logic, helpers
-npm run test:db                     # every migration on PGlite + RLS / RPC / hook / cron tests
+npm test                            # Jest: components, the activity screen's join flow, services, recommendation logic
+npm run test:db                     # every migration on PGlite + RLS / RPC / hook / cron tests, and the seed
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of these on every PR, plus a Deno type-check of the Edge Functions and handler tests that run them with `fetch` stubbed (`cd supabase/functions && deno test --allow-env`).
@@ -155,6 +159,7 @@ supabase/
   migrations/    SQL schema, RLS, RPCs, auth hook, cron
   functions/     Edge Functions (recommend-pods)
   tests/         Database tests
+  seed.sql       Demo data for development projects
 scripts/         Recommendation eval
 ```
 
