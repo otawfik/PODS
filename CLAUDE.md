@@ -40,6 +40,7 @@ npm test                    # Jest unit/component tests
 npm run test:db             # apply all migrations to PGlite, test RLS/RPCs/hook/cron
 npm run eval:recs           # recommendation eval (add -- --claude to include the LLM)
 (cd supabase/functions && npx deno@2 check */index.ts)   # type-check Edge Functions
+(cd supabase/functions && npx deno@2 test --allow-env)   # run Edge Function handlers (fetch stubbed)
 ```
 
 ## Conventions
