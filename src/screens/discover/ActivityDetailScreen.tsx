@@ -9,7 +9,7 @@ import { CategoryColors } from '../../constants/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { getActivity, requestJoinActivity, leaveActivity, deleteActivity } from '../../services/activities';
-import { getUserProfile } from '../../services/auth';
+import { getUserProfiles } from '../../services/auth';
 import CategoryChip from '../../components/CategoryChip';
 import AvatarInitials from '../../components/AvatarInitials';
 
@@ -41,20 +41,10 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (!activity) return;
     let cancelled = false;
-    (async () => {
-      const profiles: Record<string, User> = {};
-      await Promise.all(
-        activity.participants.map(async (pid) => {
-          try {
-            const p = await getUserProfile(pid);
-            if (p) profiles[pid] = p;
-          } catch {
-            // ignore — falls back to "Member"
-          }
-        })
-      );
-      if (!cancelled) setParticipantProfiles(profiles);
-    })();
+    // One query for all participants; on failure names fall back to "Member".
+    getUserProfiles(activity.participants)
+      .then((profiles) => { if (!cancelled) setParticipantProfiles(profiles); })
+      .catch((err: unknown) => console.warn('Could not load participant profiles', err));
     return () => { cancelled = true; };
   }, [activity?.participants.join('|')]);
 

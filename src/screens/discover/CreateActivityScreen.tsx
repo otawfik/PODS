@@ -100,6 +100,8 @@ export default function CreateActivityScreen({ navigation, route }: Props) {
           </View>
 
           {[
+            // The hint is meant to move with the clock, so reading it during render is intended.
+            // eslint-disable-next-line react-hooks/purity
             { label: 'Starts in (hours from now)', val: startHours, set: setStartHours, min: 0, hint: new Date(Date.now() + startHours * 3600000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
             { label: 'Duration (hours)', val: durationHours, set: setDurationHours, min: 1 },
             { label: `Max Participants: ${maxParticipants}`, val: maxParticipants, set: setMaxParticipants, min: 2, max: 20 },
