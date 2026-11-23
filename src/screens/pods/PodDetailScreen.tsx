@@ -11,7 +11,7 @@ import { PodsStackParamList, Pod, Activity, Message, User, PodCategory } from '.
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { getPod, joinPod, leavePod, grantAdmin, removeAdmin, updatePod, deletePod } from '../../services/pods';
-import { getUserProfile } from '../../services/auth';
+import { getUserProfiles } from '../../services/auth';
 import { getActivitiesForPod, requestJoinActivity } from '../../services/activities';
 import { sendPodMessage, subscribeToPodMessages } from '../../services/chat';
 import { POD_CATEGORIES } from '../../constants/categories';
@@ -88,10 +88,7 @@ export default function PodDetailScreen({ navigation, route }: Props) {
   // Subscribe to pod chat — members only. Non-members see the join prompt
   // instead of other people's messages (also enforced by security rules).
   useEffect(() => {
-    if (!isMember) {
-      setMessages([]);
-      return;
-    }
+    if (!isMember) return;
     const unsub = subscribeToPodMessages(podId, (msgs) => {
       setMessages(msgs);
       setTimeout(() => chatListRef.current?.scrollToEnd({ animated: true }), 100);
@@ -102,17 +99,12 @@ export default function PodDetailScreen({ navigation, route }: Props) {
   // Fetch member profiles when pod data is available
   useEffect(() => {
     if (!pod) return;
-    const fetchProfiles = async () => {
-      const profiles: Record<string, User> = {};
-      for (const memberId of pod.members) {
-        try {
-          const profile = await getUserProfile(memberId);
-          if (profile) profiles[memberId] = profile;
-        } catch {}
-      }
-      setMemberProfiles(profiles);
-    };
-    fetchProfiles();
+    let cancelled = false;
+    // One query for all members; on failure names fall back to "Member".
+    getUserProfiles(pod.members)
+      .then((profiles) => { if (!cancelled) setMemberProfiles(profiles); })
+      .catch((err: unknown) => console.warn('Could not load member profiles', err));
+    return () => { cancelled = true; };
   }, [pod?.members.length]);
 
   const s = makeStyles(colors);
@@ -242,7 +234,7 @@ export default function PodDetailScreen({ navigation, route }: Props) {
         <KeyboardAwareView onKeyboardShown={() => chatListRef.current?.scrollToEnd({ animated: true })}>
           <FlatList
             ref={chatListRef}
-            data={messages}
+            data={isMember ? messages : []}
             keyExtractor={(m) => m.messageId}
             renderItem={({ item }) => <MessageBubble message={item} isOwn={item.senderId === uid} />}
             contentContainerStyle={s.chatList}
