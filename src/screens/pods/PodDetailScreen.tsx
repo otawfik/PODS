@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator,
-  FlatList, Alert, TextInput, Modal,
+  FlatList, Alert, TextInput, Modal, Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -10,7 +10,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { PodsStackParamList, Pod, Activity, Message, User, PodCategory } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { getPod, joinPod, leavePod, grantAdmin, removeAdmin, updatePod, deletePod } from '../../services/pods';
+import {
+  getPod, joinPod, leavePod, grantAdmin, removeAdmin, updatePod, deletePod, isPodMuted, setPodMute,
+} from '../../services/pods';
+import { podChatKey, setActiveChat } from '../../services/notifications';
 import { getUserProfile } from '../../services/auth';
 import { getActivitiesForPod, requestJoinActivity } from '../../services/activities';
 import { sendPodMessage, subscribeToPodMessages } from '../../services/chat';
@@ -61,8 +64,15 @@ export default function PodDetailScreen({ navigation, route }: Props) {
   const [editBannerColor, setEditBannerColor] = useState(PodBannerColors[0]);
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // Mute state (this user's notifications for this pod)
+  const [muted, setMuted] = useState(false);
+  const [muteSaving, setMuteSaving] = useState(false);
+  const [muteError, setMuteError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setError(null);
+    // The mute switch is secondary: if it can't be read, the pod still loads.
+    isPodMuted(podId).then(setMuted).catch((err: unknown) => console.warn('Could not load mute', err));
     try {
       const [podData, activityData] = await Promise.all([
         getPod(podId),
@@ -98,6 +108,14 @@ export default function PodDetailScreen({ navigation, route }: Props) {
     });
     return unsub;
   }, [podId, isMember]);
+
+  // While the pod chat is on screen, its own pushes stay quiet.
+  useFocusEffect(
+    useCallback(() => {
+      if (!isMember || tab !== 'Chat') return undefined;
+      return setActiveChat(podChatKey(podId));
+    }, [podId, isMember, tab])
+  );
 
   // Fetch member profiles when pod data is available
   useEffect(() => {
@@ -187,6 +205,20 @@ export default function PodDetailScreen({ navigation, route }: Props) {
       }},
     ]
   );
+
+  const handleToggleMute = async (next: boolean) => {
+    setMuteError(null);
+    setMuteSaving(true);
+    setMuted(next); // optimistic; rolled back below if the server refuses
+    try {
+      await setPodMute(podId, next);
+    } catch (err: unknown) {
+      setMuted(!next);
+      setMuteError(err instanceof Error ? err.message : 'Could not change notifications');
+    } finally {
+      setMuteSaving(false);
+    }
+  };
 
   const handleRequestJoin = async (activityId: string) => {
     try { await requestJoinActivity(activityId, uid); await load(); }
@@ -356,6 +388,26 @@ export default function PodDetailScreen({ navigation, route }: Props) {
             <Text style={[s.inviteCodeValue, { color: colors.primary }]}>{pod.inviteCode}</Text>
           </View>
         ) : null}
+        {isMember && (
+          <View style={s.muteBox}>
+            <View style={s.muteRow}>
+              <View style={s.muteText}>
+                <Text style={s.muteLabel}>Mute notifications</Text>
+                <Text style={s.muteHint}>
+                  No pushes for new activities or pod chat. Join requests and activities you joined still notify you.
+                </Text>
+              </View>
+              <Switch
+                value={muted}
+                onValueChange={handleToggleMute}
+                disabled={muteSaving}
+                trackColor={{ true: colors.primary, false: colors.border }}
+                accessibilityLabel="Mute notifications for this pod"
+              />
+            </View>
+            {muteError ? <Text style={s.muteError}>{muteError}</Text> : null}
+          </View>
+        )}
         <Text style={s.infoDescription}>{pod.description}</Text>
         {isMember && (
           <TouchableOpacity style={s.leaveBtn} onPress={handleLeave}>
@@ -652,6 +704,12 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   inviteCodeLabel: { fontSize: 13, fontWeight: '700', color: c.text },
   inviteCodeHint: { fontSize: 12, color: c.subtext, marginTop: 2 },
   inviteCodeValue: { fontSize: 22, fontWeight: '800', letterSpacing: 3 },
+  muteBox: { marginTop: 16, borderWidth: 1, borderColor: c.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14 },
+  muteRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  muteText: { flex: 1 },
+  muteLabel: { fontSize: 14, fontWeight: '700', color: c.text },
+  muteHint: { fontSize: 12, color: c.subtext, marginTop: 2, lineHeight: 17 },
+  muteError: { fontSize: 12, color: c.danger, marginTop: 8 },
   leaveBtn: { marginTop: 32, borderWidth: 1.5, borderColor: c.danger, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   leaveBtnText: { color: c.danger, fontWeight: '600', fontSize: 15 },
   editPodBtn: { marginTop: 12, borderWidth: 1.5, borderColor: c.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
