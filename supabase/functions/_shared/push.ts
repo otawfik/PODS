@@ -15,7 +15,12 @@ export const EXPO_MAX_BATCH = 100;
 export const ANDROID_CHANNEL_ID = 'default';
 
 export type NotificationType =
-  'join_request' | 'participant_joined' | 'request_approved' | 'request_declined' | 'new_activity';
+  | 'join_request'
+  | 'participant_joined'
+  | 'request_approved'
+  | 'request_declined'
+  | 'new_activity'
+  | 'chat_message';
 
 /** A row returned by public.claim_push_notifications. */
 export interface ClaimedNotification {
@@ -27,7 +32,11 @@ export interface ClaimedNotification {
   tokens: string[] | null;
 }
 
-/** Sent as the notification's `data`, for deep links later. */
+/**
+ * Sent as the notification's `data`; the app turns it into a screen to open
+ * (src/navigation/linking.ts). A chat_message carries activityId for an
+ * activity chat, or only podId for a pod chat.
+ */
 export interface PushData {
   type: NotificationType;
   activityId?: string;
@@ -60,6 +69,8 @@ export interface TicketResult {
 
 const MAX_TITLE = 60;
 const MAX_BODY = 160;
+/** Chat text shown in a push (the database already clips it to 140). */
+const MAX_PREVIEW = 100;
 
 const KNOWN_TYPES: readonly NotificationType[] = [
   'join_request',
@@ -67,6 +78,7 @@ const KNOWN_TYPES: readonly NotificationType[] = [
   'request_approved',
   'request_declined',
   'new_activity',
+  'chat_message',
 ];
 
 export function isNotificationType(value: string): value is NotificationType {
@@ -119,6 +131,13 @@ export function buildContent(
       title = `New in ${pod}`;
       body = `${actor} posted ${activity}`;
       break;
+    case 'chat_message': {
+      // Title is the room, like a messaging app: the activity or the pod.
+      title = n.activity_id ? truncate(text(n.payload, 'activityTitle', 'Activity chat'), 60) : pod;
+      const preview = truncate(text(n.payload, 'preview', 'sent a message'), MAX_PREVIEW);
+      body = `${actor}: ${preview}`;
+      break;
+    }
   }
 
   const data: PushData = { type: n.type };
