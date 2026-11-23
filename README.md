@@ -137,7 +137,7 @@ App (PodDiscoveryScreen)
 - Code: `supabase/functions/recommend-pods/index.ts` (handler) and `supabase/functions/_shared/recommend.ts` (prompt, schema, parsing, heuristic; shared with tests and the eval).
 - **Cost control:** each student's ranking is cached for 24 h (`public.pod_recommendations`) and reused while their interests, major, bio and pods are unchanged; the model is called at most once per student per 30 s. A call is ~2–3K input tokens: about $0.02 on Claude Opus 5.5 (the default) or well under $0.001 on Claude Haiku 5.5. With the cache, a 20-student pilot is at most ~$12/month on Opus and pennies on Haiku. Set a monthly spend limit on the Anthropic Console key.
 - Claude gets no names or emails, only interests, major, bio, university and pod text. Pod descriptions are user-written, so the prompt treats them as data, and the output is checked against the candidate ids.
-- **Eval:** `npm run eval:recs` scores the rankers on 12 labelled synthetic students and 30 pods (hit@3, precision@3, recall@5, MRR, and whether a prompt-injection pod gets recommended). Add `-- --claude` with `ANTHROPIC_API_KEY` set to include the LLM, and `--model claude-haiku-5-5` to compare models. Current keyword baseline: hit@3 75%, precision@3 33%, MRR 0.64.
+- **Eval:** `npm run eval:recs` scores the rankers on 12 labelled synthetic students and 30 pods (hit@3, precision@3, recall@5, MRR, and whether a prompt-injection pod gets recommended). Add `-- --claude` with `ANTHROPIC_API_KEY` set to include the LLM, and `--model claude-haiku-5-5` to compare models. Current keyword baseline: hit@3 83%, precision@3 39%, recall@5 68%, MRR 0.74.
 
 ## How push notifications work
 
@@ -165,7 +165,7 @@ npm test                            # Jest: components, recommendation + push lo
 npm run test:db                     # every migration on PGlite + RLS / RPC / hook / cron / push tests
 ```
 
-CI (`.github/workflows/ci.yml`) runs all of these plus a Deno type-check of the Edge Functions on every PR.
+CI (`.github/workflows/ci.yml`) runs all of these on every PR, plus a Deno type-check of the Edge Functions and handler tests that run them with `fetch` stubbed (`cd supabase/functions && deno test --allow-env`).
 
 ---
 

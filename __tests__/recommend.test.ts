@@ -58,6 +58,36 @@ describe('heuristic ranking', () => {
   });
 });
 
+describe('heuristic reasons and filler', () => {
+  it('matches word variants and says why', () => {
+    const [top] = heuristicRank({ ...student, interests: ['Climb'], bio: '', major: '' }, catalog);
+    expect(top.podId).toBe('climb');
+    expect(top.reason).toBe('Matches "climb" from your profile');
+  });
+
+  it('does not pad with unrelated pods once three match', () => {
+    const three = [
+      pod('a', 'Climbing A', 'Sports'),
+      pod('b', 'Climbing B', 'Sports'),
+      pod('c', 'Climbing C', 'Sports'),
+      pod('z', 'Huge Unrelated', 'Food', '', 999),
+    ];
+    const ranked = heuristicRank(
+      { ...student, interests: ['Climbing'], bio: '', major: '', joinedPods: [] },
+      three,
+    );
+    expect(ranked.map((r) => r.podId)).not.toContain('z');
+  });
+
+  it('fills with popular pods for a student with no signals', () => {
+    const blank = { ...student, interests: [], bio: '', major: '', joinedPods: [] };
+    const ranked = heuristicRank(blank, catalog);
+    expect(ranked).toHaveLength(3);
+    expect(ranked[0].podId).toBe('hoops');
+    expect(ranked[0].reason).toMatch(/^Popular/);
+  });
+});
+
 describe('pickCandidates', () => {
   it('excludes pods the student already joined and respects the cap', () => {
     const withJoined = [...catalog, pod('chess', 'Chess Club', 'Social')];

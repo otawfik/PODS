@@ -67,39 +67,72 @@ function clip(text: string, max = MAX_FIELD_LENGTH): string {
 // Heuristic baseline (also the fallback)
 // ---------------------------------------------------------------------------
 
+/** Words match if equal, or one starts with the other (climb / climbing). */
+function sameWord(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return short.length >= 4 && long.startsWith(short);
+}
+
+interface HeuristicMatch {
+  score: number;
+  /** The student's own word that matched the pod text, if any. */
+  matchedWord: string | null;
+  /** How many of the student's pods share this pod's category. */
+  categoryAffinity: number;
+}
+
 /**
  * Score = keyword overlap between the student's interests/major/bio and the
  * pod text, + a bonus for categories the student already joins, + a small
  * popularity term so ties go to active pods.
  */
-export function heuristicScore(student: StudentSignals, pod: CandidatePod): number {
-  const studentWords = new Set(
-    tokenize([student.interests.join(' '), student.major, student.bio].join(' ')),
-  );
-  const podWords = new Set(tokenize(`${pod.name} ${pod.description} ${pod.category}`));
-  let overlap = 0;
-  for (const w of podWords) if (studentWords.has(w)) overlap += 1;
-
-  const joinedCategories = student.joinedPods.map((p) => p.category);
-  const categoryAffinity = joinedCategories.filter((c) => c === pod.category).length;
-
-  return overlap * 3 + Math.min(categoryAffinity, 3) * 2 + Math.log10(1 + pod.memberCount);
+export function heuristicMatch(student: StudentSignals, pod: CandidatePod): HeuristicMatch {
+  // Interests first, so the reason names an interest when one matched.
+  const studentWords = [
+    ...new Set(tokenize([student.interests.join(' '), student.major, student.bio].join(' '))),
+  ];
+  const podWords = [...new Set(tokenize(`${pod.name} ${pod.description} ${pod.category}`))];
+  const matched = studentWords.filter((sw) => podWords.some((pw) => sameWord(sw, pw)));
+  const categoryAffinity = student.joinedPods.filter((p) => p.category === pod.category).length;
+  return {
+    score: matched.length * 3 + Math.min(categoryAffinity, 3) * 2 + Math.log10(1 + pod.memberCount),
+    matchedWord: matched[0] ?? null,
+    categoryAffinity,
+  };
 }
 
+export function heuristicScore(student: StudentSignals, pod: CandidatePod): number {
+  return heuristicMatch(student, pod).score;
+}
+
+/** Fewest results to show; below this, popular pods fill the gap. */
+const MIN_RESULTS = 3;
+
+/**
+ * Pods that match the student's words or joined categories, best first.
+ * Unrelated pods are only added (most popular first) to reach MIN_RESULTS.
+ */
 export function heuristicRank(
   student: StudentSignals,
   candidates: CandidatePod[],
   limit = MAX_RESULTS,
 ): Recommendation[] {
-  return candidates
-    .map((pod) => ({ pod, score: heuristicScore(student, pod) }))
-    .sort((a, b) => b.score - a.score || b.pod.memberCount - a.pod.memberCount)
-    .slice(0, limit)
-    .map(({ pod }) => ({
-      podId: pod.podId,
-      reason: `Popular ${pod.category.toLowerCase()} pod on your campus`,
-      source: 'heuristic' as const,
-    }));
+  const scored = candidates
+    .map((pod) => ({ pod, m: heuristicMatch(student, pod) }))
+    .sort((a, b) => b.m.score - a.m.score || b.pod.memberCount - a.pod.memberCount);
+  const related = scored.filter(({ m }) => m.matchedWord || m.categoryAffinity > 0);
+  const filler = scored.filter(({ m }) => !m.matchedWord && m.categoryAffinity === 0);
+  const picked = [...related, ...filler.slice(0, Math.max(0, MIN_RESULTS - related.length))];
+  return picked.slice(0, limit).map(({ pod, m }) => ({
+    podId: pod.podId,
+    reason: m.matchedWord
+      ? `Matches "${m.matchedWord}" from your profile`
+      : m.categoryAffinity > 0
+        ? `Similar to the ${pod.category.toLowerCase()} pods you're in`
+        : `Popular ${pod.category.toLowerCase()} pod on your campus`,
+    source: 'heuristic' as const,
+  }));
 }
 
 /**
