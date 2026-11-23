@@ -6,6 +6,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { logoutUser, updateUserProfile } from '../../services/auth';
 import AvatarInitials from '../../components/AvatarInitials';
+import BlockedUsersSection from '../../components/BlockedUsersSection';
 import { INTEREST_SUGGESTIONS } from '../../constants/categories';
 
 const MAX_INTERESTS = 20;
@@ -181,6 +182,8 @@ export default function ProfileScreen() {
             </View>
           ))}
         </View>
+
+        {!editing && <BlockedUsersSection />}
 
         {editing ? (
           <View style={s.editActions}>

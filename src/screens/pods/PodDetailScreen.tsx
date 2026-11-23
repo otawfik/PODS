@@ -21,6 +21,8 @@ import ActivityCard from '../../components/ActivityCard';
 import AvatarInitials from '../../components/AvatarInitials';
 import MessageBubble from '../../components/MessageBubble';
 import KeyboardAwareView from '../../components/KeyboardAwareView';
+import ReportSheet, { ReportTarget } from '../../components/ReportSheet';
+import { blockUser } from '../../services/moderation';
 
 type Props = {
   navigation: NativeStackNavigationProp<PodsStackParamList, 'PodDetail'>;
@@ -52,6 +54,13 @@ export default function PodDetailScreen({ navigation, route }: Props) {
   const [selectedMember, setSelectedMember] = useState<User | null>(null);
   const [memberModalVisible, setMemberModalVisible] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
+
+  // Report / block
+  const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
+  const [blocking, setBlocking] = useState(false);
+  const [memberError, setMemberError] = useState<string | null>(null);
+  // Bumped after a block so the chat reloads without the blocked user's messages.
+  const [chatReloadKey, setChatReloadKey] = useState(0);
 
   // Edit pod state (admin)
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -97,7 +106,7 @@ export default function PodDetailScreen({ navigation, route }: Props) {
       setTimeout(() => chatListRef.current?.scrollToEnd({ animated: true }), 100);
     });
     return unsub;
-  }, [podId, isMember]);
+  }, [podId, isMember, chatReloadKey]);
 
   // Fetch member profiles when pod data is available
   useEffect(() => {
@@ -203,10 +212,40 @@ export default function PodDetailScreen({ navigation, route }: Props) {
   const handleMemberTap = (memberId: string) => {
     const profile = memberProfiles[memberId];
     if (profile) {
+      setMemberError(null);
       setSelectedMember(profile);
       setMemberModalVisible(true);
     }
   };
+
+  const reportMessage = (m: Message) =>
+    setReportTarget({
+      type: 'message',
+      id: m.messageId,
+      summary: `${m.senderName}: ${m.message}`,
+      author: { uid: m.senderId, name: m.senderName },
+    });
+
+  const handleBlock = (member: User) => Alert.alert(
+    `Block ${member.displayName}?`,
+    "You won't see each other's messages or campus activities, and they can't join yours. They are not told. You both stay in this pod.",
+    [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Block', style: 'destructive', onPress: async () => {
+        setBlocking(true);
+        setMemberError(null);
+        try {
+          await blockUser(member.uid);
+          setMemberModalVisible(false);
+          setChatReloadKey((k) => k + 1);
+        } catch (err: unknown) {
+          setMemberError(err instanceof Error && err.message ? err.message : 'Could not block this user. Try again.');
+        } finally {
+          setBlocking(false);
+        }
+      }},
+    ]
+  );
 
   const handleGrantAdmin = async (memberId: string) => {
     setAdminLoading(true);
@@ -244,7 +283,13 @@ export default function PodDetailScreen({ navigation, route }: Props) {
             ref={chatListRef}
             data={messages}
             keyExtractor={(m) => m.messageId}
-            renderItem={({ item }) => <MessageBubble message={item} isOwn={item.senderId === uid} />}
+            renderItem={({ item }) => (
+              <MessageBubble
+                message={item}
+                isOwn={item.senderId === uid}
+                onLongPress={item.senderId === uid ? undefined : () => reportMessage(item)}
+              />
+            )}
             contentContainerStyle={s.chatList}
             showsVerticalScrollIndicator={false}
             onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: false })}
@@ -372,6 +417,13 @@ export default function PodDetailScreen({ navigation, route }: Props) {
             </TouchableOpacity>
           </>
         )}
+        <TouchableOpacity
+          style={s.reportLink}
+          onPress={() => setReportTarget({ type: 'pod', id: podId, summary: pod.name })}
+        >
+          <Ionicons name="flag-outline" size={14} color={colors.subtext} />
+          <Text style={s.reportLinkText}>Report this pod</Text>
+        </TouchableOpacity>
       </View>
     );
   };
@@ -509,11 +561,49 @@ export default function PodDetailScreen({ navigation, route }: Props) {
                     )}
                   </View>
                 )}
+
+                {/* Safety actions: anyone, on anyone but themselves */}
+                {selectedMember.uid !== uid && (
+                  <View style={s.safetyActions}>
+                    {memberError ? <Text style={s.memberError}>{memberError}</Text> : null}
+                    <TouchableOpacity
+                      style={s.safetyBtn}
+                      onPress={() => {
+                        const target: ReportTarget = {
+                          type: 'user',
+                          id: selectedMember.uid,
+                          summary: selectedMember.displayName,
+                        };
+                        setMemberModalVisible(false);
+                        // iOS can drop a modal that opens while another is still closing.
+                        setTimeout(() => setReportTarget(target), 400);
+                      }}
+                    >
+                      <Ionicons name="flag-outline" size={16} color={colors.danger} />
+                      <Text style={[s.safetyBtnText, { color: colors.danger }]}>Report</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.safetyBtn} onPress={() => handleBlock(selectedMember)} disabled={blocking}>
+                      {blocking ? (
+                        <ActivityIndicator size="small" color={colors.danger} />
+                      ) : (
+                        <>
+                          <Ionicons name="ban-outline" size={16} color={colors.danger} />
+                          <Text style={[s.safetyBtnText, { color: colors.danger }]}>Block</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
             )}
           </View>
         </View>
       </Modal>
+      <ReportSheet
+        target={reportTarget}
+        onClose={() => setReportTarget(null)}
+        onBlocked={() => setChatReloadKey((k) => k + 1)}
+      />
       {/* Edit Pod Modal (admin) */}
       <Modal
         visible={editModalVisible}
@@ -642,6 +732,12 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   adminActions: { marginTop: 24, width: '100%', paddingHorizontal: 12 },
   adminActionBtn: { borderWidth: 1.5, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   adminActionText: { fontWeight: '600', fontSize: 15 },
+  safetyActions: { marginTop: 20, width: '100%', paddingHorizontal: 12, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 12 },
+  safetyBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 12, borderWidth: 1.5, borderColor: c.border },
+  safetyBtnText: { fontWeight: '600', fontSize: 14 },
+  memberError: { width: '100%', textAlign: 'center', color: c.danger, fontSize: 13 },
+  reportLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 24, padding: 8 },
+  reportLinkText: { fontSize: 13, color: c.subtext },
   // Info
   infoTab: { padding: 20 },
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.border },
