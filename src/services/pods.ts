@@ -162,3 +162,21 @@ export async function searchPods(searchTerm: string): Promise<Pod[]> {
       p.category.toLowerCase().includes(term)
   );
 }
+
+// ---------- Per-pod mute ----------
+
+/** Whether the signed-in user muted this pod (RLS returns only their own row). */
+export async function isPodMuted(podId: string): Promise<boolean> {
+  const rows = check(
+    await supabase.from('pod_mutes').select('pod_id').eq('pod_id', podId).limit(1)
+  );
+  return (rows as { pod_id: string }[]).length > 0;
+}
+
+/**
+ * Mute or unmute a pod's notifications (new activities and pod chat) for the
+ * signed-in user. Join requests and activities they joined still notify them.
+ */
+export async function setPodMute(podId: string, muted: boolean): Promise<void> {
+  check(await supabase.rpc('set_pod_mute', { p_pod_id: podId, p_muted: muted }));
+}

@@ -220,3 +220,34 @@ Deno.test('a notification with no tokens is marked sent without calling Expo', o
     restore();
   }
 });
+
+Deno.test('sends a chat message with the room as title and its ids in data', opts, async () => {
+  const world = newWorld([
+    [
+      {
+        id: 'c1',
+        type: 'chat_message',
+        activity_id: 'act-9',
+        pod_id: null,
+        payload: { activityTitle: 'Library grind', actorName: 'Milo', preview: 'Running late' },
+        tokens: [TOKEN_A],
+      },
+    ],
+  ]);
+  const restore = install(world);
+  setEnv();
+  try {
+    const totals = await (await call('shh')).json();
+    assert.equal(totals.messages, 1);
+    const [message] = world.expoRequests[0] as unknown as {
+      title: string;
+      body: string;
+      data: Record<string, unknown>;
+    }[];
+    assert.equal(message.title, 'Library grind');
+    assert.equal(message.body, 'Milo: Running late');
+    assert.deepEqual(message.data, { type: 'chat_message', activityId: 'act-9' });
+  } finally {
+    restore();
+  }
+});

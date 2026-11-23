@@ -9,6 +9,10 @@ import { supabase, check } from './supabase';
 // (supabase/migrations/20261118000100_push_notifications.sql); the app only
 // tells it where this device can be reached.
 //
+// It also reports notification taps (subscribeToNotificationTaps) so the
+// navigation layer can open the right screen, and keeps chat pushes quiet
+// while that chat is on screen (setActiveChat).
+//
 // Push needs a real device and a development/production build with an EAS
 // projectId. Expo Go on Android, simulators, web, and builds without a
 // projectId are skipped quietly.
@@ -29,18 +33,107 @@ let registeredToken: string | null = null;
 /** Ask for permission at most once per app session. */
 let askedThisSession = false;
 
-/** Show notifications that arrive while the app is open. Call once at startup. */
+/** The `data` the server attaches to every push (supabase/functions/_shared/push.ts). */
+export interface PushData {
+  type: string;
+  activityId?: string;
+  podId?: string;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Validate a notification's `data`. Ids that are not UUIDs are dropped. */
+export function parsePushData(data: unknown): PushData | null {
+  if (typeof data !== 'object' || data === null) return null;
+  const { type, activityId, podId } = data as Record<string, unknown>;
+  if (typeof type !== 'string' || !type) return null;
+  const parsed: PushData = { type };
+  if (typeof activityId === 'string' && UUID.test(activityId)) parsed.activityId = activityId;
+  if (typeof podId === 'string' && UUID.test(podId)) parsed.podId = podId;
+  return parsed;
+}
+
+// ---------- Chat on screen ----------
+
+export const activityChatKey = (activityId: string) => `activity:${activityId}`;
+export const podChatKey = (podId: string) => `pod:${podId}`;
+
+/** The chat the user is looking at right now, if any. */
+let activeChat: string | null = null;
+
+/**
+ * Tell the notification handler which chat is on screen. Returns a cleanup
+ * to call when the chat is hidden (use it as an effect cleanup).
+ */
+export function setActiveChat(key: string): () => void {
+  activeChat = key;
+  return () => {
+    if (activeChat === key) activeChat = null;
+  };
+}
+
+/** True for a chat_message push that belongs to the chat on screen. */
+export function isForActiveChat(data: unknown): boolean {
+  const push = parsePushData(data);
+  if (!activeChat || push?.type !== 'chat_message') return false;
+  const key = push.activityId
+    ? activityChatKey(push.activityId)
+    : push.podId
+      ? podChatKey(push.podId)
+      : null;
+  return key === activeChat;
+}
+
+/**
+ * Show notifications that arrive while the app is open, except chat messages
+ * for the chat already on screen. Call once at startup.
+ */
 export function configureForegroundNotifications(): void {
   if (Platform.OS === 'web') return;
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      // On Android, no sound also means no heads-up banner.
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
+    handleNotification: async (notification) => {
+      const show = !isForActiveChat(notification.request.content.data);
+      return {
+        shouldShowBanner: show,
+        shouldShowList: show,
+        // On Android, no sound also means no heads-up banner.
+        shouldPlaySound: show,
+        shouldSetBadge: false,
+      };
+    },
   });
+}
+
+// ---------- Taps ----------
+
+/** Last tap handled, so a cold-start response is not delivered twice. */
+let lastHandledTap: string | null = null;
+
+/**
+ * Calls `onTap` with the notification's `data` when the user taps a
+ * notification: while the app is running or in the background, and once for
+ * the tap that launched the app. Returns an unsubscribe function.
+ */
+export function subscribeToNotificationTaps(onTap: (data: unknown) => void): () => void {
+  if (Platform.OS === 'web') return () => {};
+  const handle = (response: Notifications.NotificationResponse | null) => {
+    if (!response) return;
+    if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
+    const id = response.notification.request.identifier;
+    if (id === lastHandledTap) return;
+    lastHandledTap = id;
+    onTap(response.notification.request.content.data);
+  };
+  try {
+    // The tap that opened the app (cold start) arrives before any listener.
+    handle(Notifications.getLastNotificationResponse());
+    Notifications.clearLastNotificationResponse();
+    const subscription = Notifications.addNotificationResponseReceivedListener(handle);
+    return () => subscription.remove();
+  } catch (err: unknown) {
+    console.warn('Notification taps unavailable', err);
+    return () => {};
+  }
 }
 
 function getProjectId(): string | null {

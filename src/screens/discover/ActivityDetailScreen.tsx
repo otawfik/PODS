@@ -33,7 +33,20 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
   const [actionLoading, setActionLoading] = useState(false);
   const [participantProfiles, setParticipantProfiles] = useState<Record<string, User>>({});
 
-  const load = async () => { const d = await getActivity(activityId); setActivity(d); setLoading(false); };
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const d = await getActivity(activityId);
+      setActivity(d);
+      // A link or notification can point at an activity that was deleted.
+      setError(d ? null : 'This activity is no longer available.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not load this activity');
+    } finally {
+      setLoading(false);
+    }
+  };
   // Reload whenever the screen comes back into view.
   useFocusEffect(useCallback(() => { load(); }, [activityId]));
 
@@ -59,7 +72,20 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
   }, [activity?.participants.join('|')]);
 
   const s = makeStyles(colors);
-  if (loading || !activity) return <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
+  if (loading) return <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
+  if (error || !activity) {
+    return (
+      <View style={s.center}>
+        <Text style={s.loadErrorText}>{error ?? 'This activity is no longer available.'}</Text>
+        <TouchableOpacity onPress={() => { setLoading(true); load(); }} style={s.loadErrorBtn}>
+          <Text style={[s.loadErrorBtnText, { color: colors.primary }]}>Retry</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={s.loadErrorBtn}>
+          <Text style={[s.loadErrorBtnText, { color: colors.subtext }]}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const uid = userProfile?.uid ?? '';
   const isHost = activity.hostId === uid;
@@ -199,6 +225,9 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
 const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.background },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.background },
+  loadErrorText: { fontSize: 15, color: c.subtext, textAlign: 'center', paddingHorizontal: 24, marginBottom: 8 },
+  loadErrorBtn: { paddingHorizontal: 28, paddingVertical: 10 },
+  loadErrorBtnText: { fontWeight: '700', fontSize: 15 },
   hero: { paddingBottom: 24, paddingTop: 8 },
   backBtn: { padding: 16 },
   heroContent: { paddingHorizontal: 20, gap: 10 },

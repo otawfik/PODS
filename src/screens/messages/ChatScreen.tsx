@@ -1,16 +1,18 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RouteProp } from '@react-navigation/native';
+import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { MessagesStackParamList, Message } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { sendMessage, subscribeToMessages } from '../../services/chat';
+import { getActivity } from '../../services/activities';
+import { activityChatKey, setActiveChat } from '../../services/notifications';
 import MessageBubble from '../../components/MessageBubble';
 import KeyboardAwareView from '../../components/KeyboardAwareView';
 
@@ -28,20 +30,68 @@ function getCountdown(expiresAt: string): string {
 }
 
 export default function ChatScreen({ navigation, route }: Props) {
-  const { activityId, activityTitle, expiresAt } = route.params;
+  const { activityId, activityTitle: titleParam, expiresAt: expiresAtParam } = route.params;
   const { colors } = useTheme();
   const { userProfile } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
-  const [countdown, setCountdown] = useState(getCountdown(expiresAt));
   const flatListRef = useRef<FlatList>(null);
-  const isExpired = new Date(expiresAt) <= new Date();
+
+  // Opened from the Messages list, the title and expiry come with the route.
+  // Opened from a notification or link, only the id does, so load the rest.
+  const [loaded, setLoaded] = useState<{ id: string; title: string; expiresAt: string } | null>(null);
+  const [loadFailure, setLoadFailure] = useState<{ id: string; message: string } | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const needsLoad = !titleParam || !expiresAtParam;
 
   useEffect(() => {
-    const timer = setInterval(() => setCountdown(getCountdown(expiresAt)), 30000);
+    if (!needsLoad) return;
+    let cancelled = false;
+    getActivity(activityId)
+      .then((activity) => {
+        if (cancelled) return;
+        if (!activity) {
+          setLoadFailure({ id: activityId, message: 'This chat is no longer available.' });
+        } else {
+          setLoaded({ id: activityId, title: activity.title, expiresAt: activity.expiresAt });
+        }
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'Could not load this chat';
+        setLoadFailure({ id: activityId, message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [needsLoad, activityId, loadAttempt]);
+
+  const retryLoad = () => {
+    setLoadFailure(null);
+    setLoadAttempt((n) => n + 1);
+  };
+  const loadError = loadFailure?.id === activityId ? loadFailure.message : null;
+
+  const details = !needsLoad
+    ? { title: titleParam, expiresAt: expiresAtParam }
+    : loaded?.id === activityId
+      ? loaded
+      : null;
+  const activityTitle = details?.title ?? '';
+  const expiresAt = details?.expiresAt ?? null;
+  const isExpired = expiresAt ? new Date(expiresAt) <= new Date() : false;
+
+  // Re-render every 30 s so the countdown (and the expired lock) stay current.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((n) => n + 1), 30000);
     return () => clearInterval(timer);
-  }, [expiresAt]);
+  }, []);
+  const countdown = expiresAt ? getCountdown(expiresAt) : '';
+
+  // While this chat is on screen, its own pushes stay quiet.
+  useFocusEffect(useCallback(() => setActiveChat(activityChatKey(activityId)), [activityId]));
 
   useEffect(() => {
     const unsub = subscribeToMessages(activityId, (msgs) => {
@@ -59,6 +109,30 @@ export default function ChatScreen({ navigation, route }: Props) {
   };
 
   const s = makeStyles(colors);
+
+  if (!details) {
+    return (
+      <SafeAreaView style={s.container} edges={['top']}>
+        <View style={s.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn} accessibilityLabel="Back">
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+        <View style={s.loadState}>
+          {loadError ? (
+            <>
+              <Text style={s.loadErrorText}>{loadError}</Text>
+              <TouchableOpacity onPress={retryLoad} style={s.retryBtn}>
+                <Text style={s.retryBtnText}>Retry</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <ActivityIndicator size="large" color={colors.primary} />
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
@@ -116,6 +190,10 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   container: { flex: 1, backgroundColor: c.background },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: c.border, backgroundColor: c.card },
   backBtn: { marginRight: 12 },
+  loadState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  loadErrorText: { fontSize: 15, color: c.subtext, textAlign: 'center', marginBottom: 16 },
+  retryBtn: { borderWidth: 1.5, borderColor: c.primary, borderRadius: 12, paddingHorizontal: 28, paddingVertical: 12 },
+  retryBtnText: { color: c.primary, fontWeight: '700', fontSize: 15 },
   headerInfo: { flex: 1 },
   headerTitle: { fontSize: 16, fontWeight: '700', color: c.text },
   headerCountdown: { fontSize: 12, marginTop: 2 },
