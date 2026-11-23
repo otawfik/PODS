@@ -47,6 +47,7 @@ Pods are lightweight, purpose-built groups with a shelf life. You open the app, 
 - Email sign-up and login with Supabase Auth (6-digit email verification and password-reset codes)
 - `.edu`-only sign-up enforced on the server by an auth hook; university derived from the email domain
 - Editable profiles with major and interests
+- In-app account deletion (Profile → Delete account): removes the profile, sign-in, hosted activities and sent messages, and takes the user out of every pod and activity
 
 **Polish**
 - Cross-platform: iOS, Android, and web from a single codebase
@@ -118,6 +119,11 @@ npx expo start
    supabase functions deploy send-push --no-verify-jwt
    ```
    Until the vault secrets exist, events wait in `notification_outbox` (pruned after 7 days). Devices only get a token in a development/production build with an EAS `projectId`.
+5. Account deletion (needs no secrets):
+   ```bash
+   supabase functions deploy delete-account
+   ```
+   The function checks the caller's JWT, runs `public.delete_account_data` (service role only) and then deletes the auth user. A pod left without an admin goes to its longest-standing member; a pod left empty is deleted.
 
 ---
 
