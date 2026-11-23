@@ -1,4 +1,5 @@
 import { supabase, check } from './supabase';
+import { askForPushAfterAction } from './notifications';
 import { Activity, ActivityCategory } from '../types';
 
 // Writes run as Postgres functions (supabase/migrations) so capacity checks,
@@ -69,6 +70,9 @@ export async function createActivity(
       p_auto_approve: data.autoApprove,
     })
   );
+  // The roadmap asks for the push permission prompt here (or after a join
+  // request), not on the welcome screen.
+  askForPushAfterAction();
   return id as string;
 }
 
@@ -121,6 +125,7 @@ export async function requestJoinActivity(activityId: string, _userId: string): 
   const activity = await getActivity(activityId);
   if (!activity) throw new Error('Activity not found');
   check(await supabase.rpc('request_join_activity', { p_activity_id: activityId }));
+  askForPushAfterAction();
 }
 
 /** Host approves a request; capacity is re-checked atomically on the server. */
