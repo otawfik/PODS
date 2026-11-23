@@ -6,6 +6,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { logoutUser, updateUserProfile } from '../../services/auth';
 import AvatarInitials from '../../components/AvatarInitials';
+import DeleteAccountModal from '../../components/DeleteAccountModal';
 import { INTEREST_SUGGESTIONS } from '../../constants/categories';
 
 const MAX_INTERESTS = 20;
@@ -20,6 +21,7 @@ export default function ProfileScreen() {
   const [interests, setInterests] = useState<string[]>(userProfile?.interests ?? []);
   const [customInterest, setCustomInterest] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleteVisible, setDeleteVisible] = useState(false);
 
   if (!userProfile) return null;
 
@@ -197,7 +199,15 @@ export default function ProfileScreen() {
             <Text style={s.editBtnText}>Edit Profile</Text>
           </TouchableOpacity>
         )}
+
+        {!editing && (
+          <TouchableOpacity style={s.deleteBtn} onPress={() => setDeleteVisible(true)} testID="delete-account-open">
+            <Ionicons name="trash-outline" size={16} color={colors.danger} />
+            <Text style={s.deleteBtnText}>Delete account</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
+      <DeleteAccountModal visible={deleteVisible} onClose={() => setDeleteVisible(false)} />
     </SafeAreaView>
   );
 }
@@ -241,4 +251,6 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   saveBtnText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
   editBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: c.primary, borderRadius: 12, paddingVertical: 14, gap: 8, marginTop: 8 },
   editBtnText: { fontSize: 15, fontWeight: '600', color: c.primary },
+  deleteBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 8, marginTop: 24 },
+  deleteBtnText: { fontSize: 14, fontWeight: '600', color: c.danger },
 });

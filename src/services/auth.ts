@@ -1,6 +1,6 @@
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase, check } from './supabase';
-import { unregisterPushToken } from './notifications';
+import { registerForPushNotifications, unregisterPushToken } from './notifications';
 import { User } from '../types';
 
 // ---------- Row mapping (Postgres snake_case <-> app camelCase) ----------
@@ -55,7 +55,7 @@ export class EmailNotConfirmedError extends Error {
 export async function registerUser(
   email: string,
   password: string,
-  displayName: string
+  displayName: string,
 ): Promise<void> {
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -106,6 +106,52 @@ export async function logoutUser(): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+// ---------- Account deletion ----------
+
+/** What the delete-account function requires as proof of intent. */
+export const DELETE_ACCOUNT_CONFIRMATION = 'DELETE';
+
+/** The server's own explanation, when a failed function call carries one. */
+async function functionErrorMessage(error: {
+  message: string;
+  context?: unknown;
+}): Promise<string> {
+  const context = error.context;
+  if (context && typeof (context as Response).json === 'function') {
+    try {
+      const body: unknown = await (context as Response).json();
+      const message = (body as { error?: unknown } | null)?.error;
+      if (typeof message === 'string' && message) return message;
+    } catch {
+      // Not JSON: fall through to the generic message.
+    }
+  }
+  return error.message;
+}
+
+/**
+ * Permanently delete the signed-in user's account through the
+ * `delete-account` Edge Function (supabase/functions/delete-account), then
+ * clear the local session so the app returns to the sign-in screens.
+ * Throws, leaving the user signed in, if the server could not delete it.
+ */
+export async function deleteAccount(): Promise<void> {
+  // While still signed in: stop pushes for this account on this device.
+  await unregisterPushToken();
+  const { error } = await supabase.functions.invoke<{ deleted: boolean }>('delete-account', {
+    method: 'POST',
+    body: { confirm: DELETE_ACCOUNT_CONFIRMATION },
+  });
+  if (error) {
+    // The account is still there, so this device should keep getting pushes.
+    void registerForPushNotifications({ prompt: false });
+    throw new Error(await functionErrorMessage(error));
+  }
+  // The server-side session died with the account; only local state is left.
+  // A failure here must not look like a failed deletion.
+  await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+}
+
 // ---------- Password reset (code-based) ----------
 
 /** Email a password-reset code to the address. */
@@ -118,7 +164,7 @@ export async function sendPasswordResetCode(email: string): Promise<void> {
 export async function resetPasswordWithCode(
   email: string,
   code: string,
-  newPassword: string
+  newPassword: string,
 ): Promise<void> {
   const { error: verifyError } = await supabase.auth.verifyOtp({
     email,
