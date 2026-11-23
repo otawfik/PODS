@@ -5,6 +5,9 @@ export interface User {
   university: string;
   profilePhoto?: string;
   bio?: string;
+  major: string;
+  /** Free-text interests (chips on the profile); feed pod recommendations. */
+  interests: string[];
   joinDate: string;
   podsJoined: string[];
   commendations: number;

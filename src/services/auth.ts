@@ -1,7 +1,6 @@
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase, check } from './supabase';
 import { User } from '../types';
-import { getUniversityFromEmail } from '../constants/categories';
 
 // ---------- Row mapping (Postgres snake_case <-> app camelCase) ----------
 
@@ -12,6 +11,8 @@ export type ProfileRow = {
   university: string;
   profile_photo: string | null;
   bio: string | null;
+  major: string;
+  interests: string[];
   join_date: string;
   pods_joined: string[];
   commendations: number;
@@ -26,6 +27,8 @@ export function toUser(row: ProfileRow): User {
     university: row.university,
     profilePhoto: row.profile_photo ?? undefined,
     bio: row.bio ?? undefined,
+    major: row.major ?? '',
+    interests: row.interests ?? [],
     joinDate: row.join_date,
     podsJoined: row.pods_joined ?? [],
     commendations: row.commendations,
@@ -56,9 +59,8 @@ export async function registerUser(
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: {
-      data: { display_name: displayName, university: getUniversityFromEmail(email) },
-    },
+    // University is derived from the email on the server (handle_new_user).
+    options: { data: { display_name: displayName } },
   });
   if (error) throw new Error(error.message);
   // With email confirmation on, signing up an already-registered address
@@ -128,29 +130,15 @@ export async function resetPasswordWithCode(
 // ---------- Profiles ----------
 
 /**
- * Self-heal: if a user is authed but their profile row is missing, create a
- * minimal one instead of leaving the app in a permanent loading state.
+ * Self-heal: if a user is authed but their profile row is missing, the
+ * server creates a minimal one (ensure_profile) instead of leaving the app in
+ * a permanent loading state. Email and university come from the verified
+ * auth record, never from the client.
  */
 export async function ensureUserProfile(authUser: SupabaseUser): Promise<User> {
   const existing = await getUserProfile(authUser.id);
   if (existing) return existing;
-  const email = authUser.email ?? '';
-  const meta = (authUser.user_metadata ?? {}) as { display_name?: string };
-  const row = check(
-    await supabase
-      .from('profiles')
-      .upsert(
-        {
-          id: authUser.id,
-          display_name: meta.display_name || 'Member',
-          email,
-          university: getUniversityFromEmail(email),
-        },
-        { onConflict: 'id' }
-      )
-      .select()
-      .single()
-  );
+  const row = check(await supabase.rpc('ensure_profile').single());
   return toUser(row as ProfileRow);
 }
 
@@ -159,16 +147,18 @@ export async function getUserProfile(uid: string): Promise<User | null> {
   return row ? toUser(row as ProfileRow) : null;
 }
 
-export async function updateUserProfile(uid: string, updates: Partial<User>): Promise<void> {
+/** The profile fields a user may edit. Identity columns are server-owned. */
+export type EditableProfile = Partial<
+  Pick<User, 'displayName' | 'bio' | 'profilePhoto' | 'major' | 'interests'>
+>;
+
+export async function updateUserProfile(uid: string, updates: EditableProfile): Promise<void> {
   const row: Partial<ProfileRow> = {};
   if (updates.displayName !== undefined) row.display_name = updates.displayName;
-  if (updates.email !== undefined) row.email = updates.email;
-  if (updates.university !== undefined) row.university = updates.university;
   if (updates.profilePhoto !== undefined) row.profile_photo = updates.profilePhoto;
   if (updates.bio !== undefined) row.bio = updates.bio;
-  if (updates.podsJoined !== undefined) row.pods_joined = updates.podsJoined;
-  if (updates.commendations !== undefined) row.commendations = updates.commendations;
-  if (updates.postsCount !== undefined) row.posts_count = updates.postsCount;
+  if (updates.major !== undefined) row.major = updates.major;
+  if (updates.interests !== undefined) row.interests = updates.interests;
   if (Object.keys(row).length > 0) {
     check(await supabase.from('profiles').update(row).eq('id', uid));
   }

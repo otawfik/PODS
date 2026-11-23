@@ -24,8 +24,8 @@ Verified: the migration was tested against a local Postgres with fake users (pri
 
 **Known gaps carried into Phase 2** (both were also true on Firebase):
 
-- **Domain restriction is client-side only.** The app checks for `.edu`, but the server accepts any email. The emailed code proves ownership of the address, but the "BU emails only" auth hook (Phase 2 step 3) isn't in yet.
-- **Expiry is still lazy.** An activity flips to `expired` (and its chat is cleared) when someone opens it after the deadline. The `pg_cron` job (Phase 2 step 6) will make it automatic.
+- **Domain restriction.** *(Nov 17: done.)* `public.hook_before_user_created` rejects non-`.edu` sign-ups on the server (plus an allowlist table for store-review accounts). It must be switched on once in Dashboard → Authentication → Hooks. University is now derived from the email server-side, and clients can no longer edit `university`/`email` on their profile (that was a hole: RLS trusts `university`).
+- **Expiry.** *(Nov 17: done.)* A `pg_cron` job runs `expire_due_activities()` every minute. Chat is still deleted at expiry rather than 24 h later.
 - **Schema is still the array-based port** (`pods.members`, `activities.participants` as arrays), not the relational v1 schema (`pod_members`, `join_requests`, `activity_participants`, `universities`, …).
 
 **Operational notes.** Supabase project ref `utnezmiwsftmcijwuika` (free plan). Free projects pause after about a week without activity — un-pause from the dashboard. The old Firebase project is unused and should be deleted (see §6).

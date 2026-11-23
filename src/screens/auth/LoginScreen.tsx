@@ -148,7 +148,7 @@ export default function LoginScreen({ navigation }: Props) {
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => navigation.navigate('Register')} style={s.registerLink}>
-            <Text style={s.registerLinkText}>Don't have an account? <Text style={s.registerLinkBold}>Sign Up</Text></Text>
+            <Text style={s.registerLinkText}>Don&apos;t have an account? <Text style={s.registerLinkBold}>Sign Up</Text></Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
