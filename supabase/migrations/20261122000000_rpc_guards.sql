@@ -8,6 +8,9 @@
 --    manage or delete (leave_pod already refuses this; now this does too).
 --
 -- Signatures and grants are unchanged (create or replace keeps them).
+--
+-- Dated before the reports/blocks migration on purpose: that one also replaces
+-- request_join_activity (adding the block check) and must run after this.
 -- =============================================================================
 
 create or replace function public.request_join_activity(p_activity_id uuid)
