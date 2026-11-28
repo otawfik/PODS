@@ -461,7 +461,7 @@ test('chat is readable and writable only by the people in the room', async () =>
 });
 
 // ---------------------------------------------------------------------------
-// Guards added in 20261123000300_rpc_guards.sql (these were gaps this file found).
+// Guards added in 20261122000000_rpc_guards.sql (these were gaps this file found).
 // ---------------------------------------------------------------------------
 
 test('an expired activity accepts no new join requests', async () => {
