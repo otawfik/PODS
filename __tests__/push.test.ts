@@ -72,7 +72,39 @@ describe('buildContent', () => {
   });
 
   it('ignores unknown types', () => {
-    expect(buildContent(row({ type: 'chat_message' }))).toBeNull();
+    expect(buildContent(row({ type: 'poke' }))).toBeNull();
+  });
+
+  it('writes chat messages with the room as title and a clipped preview', () => {
+    const activityChat = buildContent(
+      row({
+        type: 'chat_message',
+        pod_id: null,
+        payload: { activityTitle: 'Library grind', actorName: 'Milo', preview: 'Running  late,\nsave me a seat' },
+      }),
+    );
+    expect(activityChat).toEqual({
+      title: 'Library grind',
+      body: 'Milo: Running late, save me a seat',
+      data: { type: 'chat_message', activityId: 'act-1' },
+    });
+
+    const podChat = buildContent(
+      row({
+        type: 'chat_message',
+        activity_id: null,
+        payload: { podName: 'CS 330', actorName: 'Hana', preview: 'y'.repeat(140) },
+      }),
+    );
+    expect(podChat?.title).toBe('CS 330');
+    expect(podChat?.data).toEqual({ type: 'chat_message', podId: 'pod-1' });
+    // "Hana: " + at most 100 characters of the message, ending in an ellipsis.
+    expect(podChat?.body).toBe(`Hana: ${'y'.repeat(99)}…`);
+
+    expect(buildContent(row({ type: 'chat_message', activity_id: null, payload: null }))).toMatchObject({
+      title: 'your pod',
+      body: 'Someone: sent a message',
+    });
   });
 });
 
