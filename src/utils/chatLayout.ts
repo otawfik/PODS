@@ -97,3 +97,13 @@ export function senderColor(senderId: string): string {
   for (let i = 0; i < senderId.length; i++) hash = (hash * 31 + senderId.charCodeAt(i)) >>> 0;
   return SENDER_COLORS[hash % SENDER_COLORS.length];
 }
+
+/** Compact time for a chat list row: "7:05 PM" today, "Yesterday", else "Nov 23". */
+export function listTime(ts: number, now: number = Date.now()): string {
+  const label = dayLabel(ts, now);
+  if (label === 'Today') {
+    return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+  if (label === 'Yesterday') return label;
+  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}

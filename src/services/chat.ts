@@ -39,7 +39,7 @@ async function fetchLatest(room: Room): Promise<Message[]> {
       .select('*')
       .eq(room.column, room.id)
       .order('created_at', { ascending: false })
-      .limit(PAGE_SIZE)
+      .limit(PAGE_SIZE),
   );
   return (rows as MessageRow[]).map(toMessage).reverse(); // chronological for display
 }
@@ -66,8 +66,13 @@ function subscribeToRoom(room: Room, callback: (messages: Message[]) => void): U
     .channel(`messages:${room.column}:${room.id}:${Date.now()}`)
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'messages', filter: `${room.column}=eq.${room.id}` },
-      refresh
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `${room.column}=eq.${room.id}`,
+      },
+      refresh,
     )
     // Deletes can't be filtered server-side; refetching is cheap.
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, refresh)
@@ -94,14 +99,20 @@ export async function sendMessage(
   activityId: string,
   senderId: string,
   senderName: string,
-  message: string
+  message: string,
 ): Promise<void> {
-  await insertMessage({ activity_id: activityId, pod_id: null, sender_id: senderId, sender_name: senderName, message });
+  await insertMessage({
+    activity_id: activityId,
+    pod_id: null,
+    sender_id: senderId,
+    sender_name: senderName,
+    message,
+  });
 }
 
 export function subscribeToMessages(
   activityId: string,
-  callback: (messages: Message[]) => void
+  callback: (messages: Message[]) => void,
 ): Unsubscribe {
   return subscribeToRoom({ column: 'activity_id', id: activityId }, callback);
 }
@@ -112,14 +123,20 @@ export async function sendPodMessage(
   podId: string,
   senderId: string,
   senderName: string,
-  message: string
+  message: string,
 ): Promise<void> {
-  await insertMessage({ activity_id: null, pod_id: podId, sender_id: senderId, sender_name: senderName, message });
+  await insertMessage({
+    activity_id: null,
+    pod_id: podId,
+    sender_id: senderId,
+    sender_name: senderName,
+    message,
+  });
 }
 
 export function subscribeToPodMessages(
   podId: string,
-  callback: (messages: Message[]) => void
+  callback: (messages: Message[]) => void,
 ): Unsubscribe {
   return subscribeToRoom({ column: 'pod_id', id: podId }, callback);
 }
@@ -127,3 +144,31 @@ export function subscribeToPodMessages(
 // Message cleanup on expiry/deletion now happens in the database
 // (expire_activity_if_needed and ON DELETE CASCADE), so there are no
 // client-side delete helpers anymore.
+
+// ---------- Messages list ----------
+
+export interface ChatPreview {
+  activityId: string;
+  senderId: string;
+  senderName: string;
+  message: string;
+  timestamp: number;
+}
+
+/** The latest message in each of the given activity chats, keyed by activity id. */
+export async function getChatPreviews(activityIds: string[]): Promise<Record<string, ChatPreview>> {
+  if (activityIds.length === 0) return {};
+  const rows = check(await supabase.rpc('get_chat_previews', { p_activity_ids: activityIds }));
+  const byId: Record<string, ChatPreview> = {};
+  for (const row of (rows ?? []) as Omit<MessageRow, 'id' | 'pod_id'>[]) {
+    if (!row.activity_id) continue;
+    byId[row.activity_id] = {
+      activityId: row.activity_id,
+      senderId: row.sender_id,
+      senderName: row.sender_name,
+      message: row.message,
+      timestamp: new Date(row.created_at).getTime(),
+    };
+  }
+  return byId;
+}

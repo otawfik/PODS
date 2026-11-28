@@ -220,3 +220,36 @@ test('emails are readable only by the owner path and by pod-mates', async () => 
   assert.ok(!anaSees.includes(ids.ben));
   assert.ok(anaSees.includes(ids.cat) && anaSees.includes(ids.ana));
 });
+
+test('chat previews return the latest readable message per activity', async () => {
+  const mine = await createActivity(ids.ana, { auto: true });
+  const notMine = await createActivity(ids.ana, { auto: true });
+  await rpc(ids.cat, `select public.request_join_activity($1)`, [mine]);
+  await rpc(ids.dan, `select public.request_join_activity($1)`, [notMine]);
+  const say = (uid, act, text, minutesAgo) =>
+    t.db.query(
+      `insert into public.messages (activity_id, sender_id, sender_name, message, created_at)
+       values ($1, $2, $3, $4, now() - make_interval(mins => $5))`,
+      [act, uid, names[uid], text, minutesAgo],
+    );
+  await say(ids.ana, mine, 'first', 10);
+  await say(ids.cat, mine, 'latest', 1);
+  await say(ids.dan, notMine, 'private to that activity', 1);
+
+  const previews = async (uid) =>
+    (await rpc(uid, `select * from public.get_chat_previews($1)`, [[mine, notMine]])).rows;
+
+  // Cat is only in `mine`: one row, the newest message.
+  const forCat = await previews(ids.cat);
+  assert.equal(forCat.length, 1);
+  assert.equal(forCat[0].activity_id, mine);
+  assert.equal(forCat[0].message, 'latest');
+  assert.equal(forCat[0].sender_name, 'Cat');
+
+  // A block hides the blocked sender's message, so the preview falls back.
+  await rpc(ids.ana, `select public.block_user($1)`, [ids.cat]);
+  const forAna = (await previews(ids.ana)).find((p) => p.activity_id === mine);
+  assert.equal(forAna.message, 'first');
+
+  await t.db.query(`delete from public.activities where id = any ($1)`, [[mine, notMine]]);
+});

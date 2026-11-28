@@ -9,6 +9,8 @@ import { CategoryColors } from '../../constants/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { getActivitiesForPods } from '../../services/activities';
+import { ChatPreview, getChatPreviews } from '../../services/chat';
+import { listTime } from '../../utils/chatLayout';
 
 type Props = { navigation: NativeStackNavigationProp<MessagesStackParamList, 'MessagesList'> };
 
@@ -26,6 +28,7 @@ export default function MessagesScreen({ navigation }: Props) {
   const { colors } = useTheme();
   const { userProfile } = useAuth();
   const [chats, setChats] = useState<Activity[]>([]);
+  const [previews, setPreviews] = useState<Record<string, ChatPreview>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -33,7 +36,12 @@ export default function MessagesScreen({ navigation }: Props) {
     try {
       if (!userProfile) return;
       const all = await getActivitiesForPods(userProfile.podsJoined);
-      setChats(all.filter((a) => a.participants.includes(userProfile.uid)));
+      const mine = all.filter((a) => a.participants.includes(userProfile.uid));
+      setChats(mine);
+      // Previews are a nicety: the list still works without them.
+      getChatPreviews(mine.map((a) => a.activityId))
+        .then(setPreviews)
+        .catch((err: unknown) => console.warn('Could not load chat previews', err));
     }
     finally { setLoading(false); setRefreshing(false); }
   }, [userProfile]);
@@ -46,32 +54,45 @@ export default function MessagesScreen({ navigation }: Props) {
 
   const activeChats = chats.filter((c) => c.status === 'active' && new Date(c.expiresAt) > new Date());
   const expiredChats = chats.filter((c) => c.status === 'expired' || new Date(c.expiresAt) <= new Date());
-  const allChats = [...activeChats.map((c) => ({ item: c, isExpired: false })), ...expiredChats.map((c) => ({ item: c, isExpired: true }))];
+  // Most recent conversation first; chats with no messages keep start-time order.
+  const byRecent = (a: Activity, b: Activity) =>
+    (previews[b.activityId]?.timestamp ?? 0) - (previews[a.activityId]?.timestamp ?? 0);
+  const allChats = [
+    ...[...activeChats].sort(byRecent).map((c) => ({ item: c, isExpired: false })),
+    ...[...expiredChats].sort(byRecent).map((c) => ({ item: c, isExpired: true })),
+  ];
 
   const renderChat = ({ item: c, isExpired }: { item: Activity; isExpired: boolean }) => {
     const accentColor = CategoryColors[c.category] ?? colors.primary;
     const countdown = getCountdown(c.expiresAt);
+    const preview = previews[c.activityId];
+    const previewText = preview
+      ? `${preview.senderId === userProfile?.uid ? 'You' : preview.senderName.split(' ')[0]}: ${preview.message}`
+      : isExpired
+        ? 'Chat locked'
+        : 'No messages yet. Say hi!';
     return (
       <TouchableOpacity style={s.chatRow}
         onPress={() => navigation.navigate('Chat', { activityId: c.activityId, activityTitle: c.title, expiresAt: c.expiresAt })}
-        activeOpacity={0.8}
+        activeOpacity={0.7}
+        accessibilityLabel={`${c.title}. ${previewText}`}
       >
         <View style={[s.chatIcon, { backgroundColor: isExpired ? colors.border : accentColor }]}>
-          <Ionicons name="chatbubbles" size={22} color="#FFFFFF" />
+          <Text style={s.chatInitial}>{c.title.trim().charAt(0).toUpperCase() || '#'}</Text>
         </View>
         <View style={s.chatInfo}>
-          <Text style={[s.chatTitle, { color: isExpired ? colors.subtext : colors.text }]} numberOfLines={1}>{c.title}</Text>
-          <Text style={[s.chatMeta, { color: colors.subtext }]}>{c.currentParticipants} members · {c.category}</Text>
-        </View>
-        <View style={s.chatRight}>
-          {isExpired ? (
-            <View style={s.lockedBadge}>
-              <Ionicons name="lock-closed" size={12} color={colors.subtext} />
-              <Text style={[s.lockedText, { color: colors.subtext }]}>Locked</Text>
-            </View>
-          ) : (
-            <Text style={[s.countdown, { color: countdown === 'Expired' ? colors.danger : colors.warning }]}>{countdown}</Text>
-          )}
+          <View style={s.chatTopLine}>
+            <Text style={[s.chatTitle, { color: isExpired ? colors.subtext : colors.text }]} numberOfLines={1}>{c.title}</Text>
+            {preview ? <Text style={[s.chatTime, { color: colors.subtext }]}>{listTime(preview.timestamp)}</Text> : null}
+          </View>
+          <View style={s.chatBottomLine}>
+            <Text style={[s.chatPreview, { color: colors.subtext }]} numberOfLines={1}>{previewText}</Text>
+            {isExpired ? (
+              <Ionicons name="lock-closed" size={13} color={colors.subtext} />
+            ) : (
+              <Text style={[s.countdown, { color: colors.subtext }]}>{countdown} left</Text>
+            )}
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -81,7 +102,6 @@ export default function MessagesScreen({ navigation }: Props) {
     <SafeAreaView style={s.container} edges={['top']}>
       <View style={s.header}>
         <Text style={s.title}>Messages</Text>
-        <Text style={s.subtitle}>Your activity group chats</Text>
       </View>
       <FlatList
         data={allChats}
@@ -106,19 +126,19 @@ export default function MessagesScreen({ navigation }: Props) {
 const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.background },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.background },
-  header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16 },
+  header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10 },
   title: { fontSize: 28, fontWeight: '800', color: c.text },
-  subtitle: { fontSize: 14, color: c.subtext, marginTop: 2 },
-  chatRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, paddingHorizontal: 16, paddingVertical: 14 },
-  chatIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginRight: 14 },
+  chatRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
+  chatIcon: { width: 50, height: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  chatInitial: { color: '#FFFFFF', fontSize: 20, fontWeight: '700' },
   chatInfo: { flex: 1 },
-  chatTitle: { fontSize: 15, fontWeight: '700', marginBottom: 3 },
-  chatMeta: { fontSize: 13 },
-  chatRight: { alignItems: 'flex-end' },
-  countdown: { fontSize: 13, fontWeight: '600' },
-  lockedBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  lockedText: { fontSize: 12 },
-  separator: { height: 1, backgroundColor: c.border, marginLeft: 78 },
+  chatTopLine: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
+  chatBottomLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 3 },
+  chatTitle: { flex: 1, fontSize: 16, fontWeight: '600' },
+  chatTime: { fontSize: 12 },
+  chatPreview: { flex: 1, fontSize: 14 },
+  countdown: { fontSize: 12 },
+  separator: { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginLeft: 78 },
   empty: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 40 },
   emptyIcon: { fontSize: 48, marginBottom: 16 },
   emptyTitle: { fontSize: 20, fontWeight: '700', color: c.text, marginBottom: 8 },

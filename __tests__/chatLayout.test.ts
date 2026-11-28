@@ -1,4 +1,10 @@
-import { buildChatItems, dayLabel, GROUP_WINDOW_MS, senderColor } from '../src/utils/chatLayout';
+import {
+  buildChatItems,
+  dayLabel,
+  GROUP_WINDOW_MS,
+  listTime,
+  senderColor,
+} from '../src/utils/chatLayout';
 import { Message } from '../src/types';
 
 const at = (iso: string) => new Date(iso).getTime();
@@ -92,5 +98,13 @@ describe('senderColor', () => {
   it('is stable for one sender', () => {
     expect(senderColor('user-a')).toBe(senderColor('user-a'));
     expect(senderColor('user-a')).toMatch(/^#[0-9A-F]{6}$/i);
+  });
+});
+
+describe('listTime', () => {
+  it('shows a clock time today, then Yesterday, then a short date', () => {
+    expect(listTime(at('2026-11-27T09:05:00'), NOW)).toBe('9:05 AM');
+    expect(listTime(at('2026-11-26T22:00:00'), NOW)).toBe('Yesterday');
+    expect(listTime(at('2026-11-23T12:00:00'), NOW)).toBe('Nov 23');
   });
 });
