@@ -38,9 +38,20 @@ Pods are lightweight, purpose-built groups with a shelf life. You open the app, 
 - Direct 1:1 messaging between members
 - Live message updates, no refresh needed
 
+**AI pod recommendations**
+- "Recommended for you" on Discover Pods, with a one-line reason for each pick
+- Ranked by Claude in a Supabase Edge Function from the student's interests, major, bio and current pods; falls back to a keyword ranker if the model is unavailable
+- Offline eval with labelled students to compare the LLM against the baseline (see below)
+
 **Accounts & profiles**
 - Email sign-up and login with Supabase Auth (6-digit email verification and password-reset codes)
-- Editable user profiles
+- `.edu`-only sign-up enforced on the server by an auth hook; university derived from the email domain
+- Editable profiles with major and interests
+- In-app account deletion (Profile → Delete account): removes the profile, sign-in, hosted activities and sent messages, and takes the user out of every pod and activity
+
+**Safety**
+- Report a user, pod, activity or chat message (long-press a message) with a reason
+- Block a user: you stop seeing each other's messages and campus activities, they can't join yours, and neither of you gets pushes about the other; manage the list under Profile → Blocked users
 
 **Polish**
 - Cross-platform: iOS, Android, and web from a single codebase
@@ -52,10 +63,13 @@ Pods are lightweight, purpose-built groups with a shelf life. You open the app, 
 
 | Layer | Technology |
 |---|---|
-| App | React Native, Expo SDK 54, TypeScript |
+| App | React Native, Expo SDK 57, TypeScript |
 | Auth | Supabase Auth (email + password, emailed codes) |
 | Database | Supabase Postgres with Row Level Security (`supabase/migrations/`) |
 | Real-time messaging | Supabase Realtime |
+| Scheduled jobs | `pg_cron` (activity expiry every minute) |
+| AI | Supabase Edge Function (Deno) → Claude API (`claude-opus-5-5`, structured JSON output) |
+| Quality | ESLint, Prettier, Jest, PGlite database tests, GitHub Actions CI |
 | Navigation | React Navigation (stack + bottom tabs) |
 
 ---
@@ -85,6 +99,101 @@ npx expo start
 
 **Supabase setup:** the app uses Supabase for auth, database, and chat. Put your project URL and publishable key in `.env` (see `.env.example` and `src/services/supabase.ts`) before running.
 
+### Backend setup (once per Supabase project)
+
+1. Run the SQL files in `supabase/migrations/` in order (or `supabase db push`).
+2. Turn on the sign-up hook: Dashboard → Authentication → Hooks → **Before User Created** → Postgres → `public.hook_before_user_created`.
+3. Deploy the recommendations function:
+   ```bash
+   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+   supabase functions deploy recommend-pods
+   ```
+   Without the key the function still works and uses the keyword ranker (free).
+   To use a cheaper model: `supabase secrets set RECOMMENDATION_MODEL=claude-haiku-5-5`.
+4. Push notifications. The migration turns on `pg_net` and `pg_cron`; pick a random secret, then:
+   ```sql
+   -- SQL Editor
+   select vault.create_secret('https://<project-ref>.supabase.co', 'project_url');
+   select vault.create_secret('<random secret>', 'push_webhook_secret');
+   ```
+   ```bash
+   supabase secrets set PUSH_WEBHOOK_SECRET=<same random secret>
+   # optional, only if "Enhanced push security" is on in Expo:
+   supabase secrets set EXPO_ACCESS_TOKEN=...
+   supabase functions deploy send-push --no-verify-jwt
+   ```
+   Until the vault secrets exist, events wait in `notification_outbox` (pruned after 7 days). Devices only get a token in a development/production build with an EAS `projectId`.
+5. Account deletion (needs no secrets):
+   ```bash
+   supabase functions deploy delete-account
+   ```
+   The function checks the caller's JWT, runs `public.delete_account_data` (service role only) and then deletes the auth user. A pod left without an admin goes to its longest-standing member; a pod left empty is deleted.
+
+### Demo data (development projects only)
+
+`supabase/seed.sql` fills a project with 20 students, 8 pods (one private, invite code `SEEDFM`) and activities in every state (open, pending requests, full, auto-approve, started, campus-wide, expired), plus some chat. Paste it into the SQL Editor after the migrations. It is safe to re-run: it replaces its own data and touches nothing else, and since times are relative to "now", re-running refreshes activities that have expired. Seed students cannot sign in; sign up with a `@bu.edu` address to see the Boston University data. Do not run it on the project real students use.
+
+---
+
+## How recommendations work
+
+```
+App (PodDiscoveryScreen)
+  └─ supabase.functions.invoke('recommend-pods')        src/services/recommendations.ts
+       └─ Edge Function (Deno, runs with the user's JWT → RLS applies)
+            1. load profile (interests, major, bio) + joined pods + open public pods
+            2. pickCandidates: drop joined pods, keep the 40 best by keyword score
+            3. Claude: one Messages API call, JSON-schema output
+               → [{ pod_id, reason }], ids not in the candidate list are discarded
+            4. on no key / error / refusal → heuristicRank
+```
+
+- Code: `supabase/functions/recommend-pods/index.ts` (handler) and `supabase/functions/_shared/recommend.ts` (prompt, schema, parsing, heuristic; shared with tests and the eval).
+- **Cost control:** each student's ranking is cached for 24 h (`public.pod_recommendations`) and reused while their interests, major, bio and pods are unchanged; the model is called at most once per student per 30 s. A call is ~2–3K input tokens: about $0.02 on Claude Opus 5.5 (the default) or well under $0.001 on Claude Haiku 5.5. With the cache, a 20-student pilot is at most ~$12/month on Opus and pennies on Haiku. Set a monthly spend limit on the Anthropic Console key.
+- Claude gets no names or emails, only interests, major, bio, university and pod text. Pod descriptions are user-written, so the prompt treats them as data, and the output is checked against the candidate ids.
+- **Eval:** `npm run eval:recs` scores the rankers on 12 labelled synthetic students and 30 pods (hit@3, precision@3, recall@5, MRR, and whether a prompt-injection pod gets recommended). Add `-- --claude` with `ANTHROPIC_API_KEY` set to include the LLM, and `--model claude-haiku-5-5` to compare models. Current keyword baseline: hit@3 83%, precision@3 39%, recall@5 68%, MRR 0.74.
+
+## How push notifications work
+
+```
+request / approve / decline / create activity (RPCs)
+  └─ AFTER trigger on activities diffs the request/participant arrays
+       └─ notification_outbox row (type, activity, recipients, text)   never rolls back the action
+            └─ pg_net POST (after commit; pg_cron retries every minute) → send-push Edge Function
+                 1. claim_push_notifications(): lease pending rows + recipients' tokens
+                 2. build messages, batches of ≤100 → Expo Push API
+                 3. delete DeviceNotRegistered tokens, mark rows sent (failed requests retry, max 5)
+```
+
+- Events: join request → host; auto-approve join → host; approved / declined → requester; new activity → the other pod members; chat message → the other people in that chat (activity participants, or pod members). Nobody is notified about their own action.
+- **Chat pushes are collapsed** so a busy chat doesn't buzz for every message: a person gets no new chat notification for a room while they already have one for that room that is still waiting to be sent or was queued in the last 2 minutes. The push shows the sender and the first 100 characters of the first message of that burst. While that chat is open on screen, its pushes are not shown at all.
+- **Mute:** the Info tab of a pod has a "Mute notifications" switch (`pod_mutes` table, `set_pod_mute` RPC). A muted pod sends you no new-activity or pod-chat pushes. Join requests to you, decisions on your requests and the chats of activities you joined still arrive.
+- **Tapping a notification** opens the matching screen through the deep-link table in `src/navigation/linking.ts`: `pods://activity/<id>` (activity), `pods://pod/<id>` (pod, on its chat), `pods://chat/<activityId>` (activity chat). If you are signed out, the link waits and opens after you sign in (`src/navigation/useDeepLinks.ts`). The `pods://` scheme works in development/production builds, not in Expo Go.
+- Code: `supabase/migrations/20261118000100_push_notifications.sql` and `20261123000200_chat_push_and_mute.sql`, `supabase/functions/send-push/index.ts`, `supabase/functions/_shared/push.ts` (message text, batching, tickets), `src/services/notifications.ts` (permission, token, taps).
+- The app asks for permission after the first join request or created activity, and removes the device's token on sign-out. Notification `data` is `{ type, activityId, podId }`; the app maps it to a screen.
+
+---
+
+## How report and block work
+
+Everything is enforced in Postgres (`supabase/migrations/20261123000000_reports_and_blocks.sql`); the app only calls three RPCs through `src/services/moderation.ts`.
+
+- **Block** (`block_user` / `unblock_user`, table `blocks`). Works in both directions and is checked by Row Level Security, so it also covers Realtime: neither person reads the other's chat messages; neither sees the other's university-wide activities (unless they already hold a spot, so they can still leave); neither can request to join the other's activities, and pending requests between them are withdrawn; push recipients who have a block with the person who caused the event are dropped. Pods, member lists and profiles stay visible, and people already in each other's activities are not removed. You can read only the blocks you made; the blocked person is not told.
+- **Report** (`report_content`, table `reports`). Targets: `user`, `pod`, `activity`, `message`; reasons come from a fixed list. You can only report something you can see. The row keeps a snapshot of the content (message text and sender, activity title, pod name), because activity chats are deleted at expiry. Reporting the same thing twice returns the open report; the limit is 20 new reports per user per 24 hours. The app can never read reports.
+- **Reviewing reports.** There is no admin screen yet. Open Dashboard → Table editor → `reports`, filter `status = open`, and set `status` to `reviewing`, `resolved` or `dismissed` by hand. Acting on a report (removing content, banning a user) is also manual for now.
+
+---
+
+## Testing
+
+```bash
+npm run lint && npm run typecheck   # static checks
+npm test                            # Jest: components, screens, services, recommendation + push logic
+npm run test:db                     # every migration on PGlite + RLS / RPC / hook / cron / push tests, and the seed
+```
+
+CI (`.github/workflows/ci.yml`) runs all of these on every PR, plus a Deno type-check of the Edge Functions and handler tests that run them with `fetch` stubbed (`cd supabase/functions && deno test --allow-env`).
+
 ---
 
 ## Project structure
@@ -93,18 +202,24 @@ npx expo start
 src/
   components/    Reusable UI (PodCard, ActivityCard, MessageBubble, ...)
   screens/       Auth, Discover, Pods, Activities, Messages, Profile
-  services/      Supabase-backed data layer (auth, pods, activities, chat)
+  services/      Supabase-backed data layer (auth, pods, activities, chat, recommendations, moderation)
   navigation/    Stack and tab navigators
   context/       Auth and theme providers
   constants/     Categories, tags, colors
   types/         Shared TypeScript types
+supabase/
+  migrations/    SQL schema, RLS, RPCs, auth hook, cron
+  functions/     Edge Functions (recommend-pods)
+  tests/         Database tests
+  seed.sql       Demo data for development projects
+scripts/         Recommendation eval
 ```
 
 ---
 
 ## Roadmap
 
-- Push notifications for activity reminders and new messages
+- Push notifications for activity reminders and new chat messages
 - Location-based Pod discovery ("what's happening near me")
 - Recurring activities and RSVP headcounts
 - Pod ratings and member reputation

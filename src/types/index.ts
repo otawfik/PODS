@@ -1,3 +1,5 @@
+import type { NavigatorScreenParams } from '@react-navigation/native';
+
 export interface User {
   uid: string;
   displayName: string;
@@ -5,6 +7,9 @@ export interface User {
   university: string;
   profilePhoto?: string;
   bio?: string;
+  major: string;
+  /** Free-text interests (chips on the profile); feed pod recommendations. */
+  interests: string[];
   joinDate: string;
   podsJoined: string[];
   commendations: number;
@@ -74,7 +79,7 @@ export type ActivityCategory = 'Study' | 'Gym' | 'Social' | 'Sports' | 'Food' | 
 export type RootStackParamList = {
   Auth: undefined;
   VerifyEmail: undefined;
-  Main: undefined;
+  Main: NavigatorScreenParams<MainTabParamList>;
 };
 
 export type AuthStackParamList = {
@@ -84,10 +89,10 @@ export type AuthStackParamList = {
 };
 
 export type MainTabParamList = {
-  Discover: undefined;
-  MyPods: undefined;
-  Messages: undefined;
-  Profile: undefined;
+  Discover: NavigatorScreenParams<DiscoverStackParamList>;
+  MyPods: NavigatorScreenParams<PodsStackParamList>;
+  Messages: NavigatorScreenParams<MessagesStackParamList>;
+  Profile: NavigatorScreenParams<ProfileStackParamList>;
 };
 
 export type DiscoverStackParamList = {
@@ -111,7 +116,8 @@ export type PodsStackParamList = {
 
 export type MessagesStackParamList = {
   MessagesList: undefined;
-  Chat: { activityId: string; activityTitle: string; expiresAt: string };
+  /** Title and expiry are missing when opened from a link or notification; the screen loads them. */
+  Chat: { activityId: string; activityTitle?: string; expiresAt?: string };
 };
 
 export type ProfileStackParamList = {

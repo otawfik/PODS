@@ -9,9 +9,10 @@ import { CategoryColors } from '../../constants/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { getActivity, requestJoinActivity, leaveActivity, deleteActivity } from '../../services/activities';
-import { getUserProfile } from '../../services/auth';
+import { getUserProfiles } from '../../services/auth';
 import CategoryChip from '../../components/CategoryChip';
 import AvatarInitials from '../../components/AvatarInitials';
+import ReportSheet, { ReportTarget } from '../../components/ReportSheet';
 
 type AnyStackWithActivityDetail = {
   ActivityDetail: { activityId: string };
@@ -32,8 +33,22 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [participantProfiles, setParticipantProfiles] = useState<Record<string, User>>({});
+  const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
 
-  const load = async () => { const d = await getActivity(activityId); setActivity(d); setLoading(false); };
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const d = await getActivity(activityId);
+      setActivity(d);
+      // A link or notification can point at an activity that was deleted.
+      setError(d ? null : 'This activity is no longer available.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not load this activity');
+    } finally {
+      setLoading(false);
+    }
+  };
   // Reload whenever the screen comes back into view.
   useFocusEffect(useCallback(() => { load(); }, [activityId]));
 
@@ -41,25 +56,28 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (!activity) return;
     let cancelled = false;
-    (async () => {
-      const profiles: Record<string, User> = {};
-      await Promise.all(
-        activity.participants.map(async (pid) => {
-          try {
-            const p = await getUserProfile(pid);
-            if (p) profiles[pid] = p;
-          } catch {
-            // ignore — falls back to "Member"
-          }
-        })
-      );
-      if (!cancelled) setParticipantProfiles(profiles);
-    })();
+    // One query for all participants; on failure names fall back to "Member".
+    getUserProfiles(activity.participants)
+      .then((profiles) => { if (!cancelled) setParticipantProfiles(profiles); })
+      .catch((err: unknown) => console.warn('Could not load participant profiles', err));
     return () => { cancelled = true; };
   }, [activity?.participants.join('|')]);
 
   const s = makeStyles(colors);
-  if (loading || !activity) return <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
+  if (loading) return <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
+  if (error || !activity) {
+    return (
+      <View style={s.center}>
+        <Text style={s.loadErrorText}>{error ?? 'This activity is no longer available.'}</Text>
+        <TouchableOpacity onPress={() => { setLoading(true); load(); }} style={s.loadErrorBtn}>
+          <Text style={[s.loadErrorBtnText, { color: colors.primary }]}>Retry</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={s.loadErrorBtn}>
+          <Text style={[s.loadErrorBtnText, { color: colors.subtext }]}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const uid = userProfile?.uid ?? '';
   const isHost = activity.hostId === uid;
@@ -191,7 +209,28 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
         </View>
 
         <View style={s.actionContainer}>{renderActionButton()}</View>
+
+        {!isHost && (
+          <TouchableOpacity
+            style={s.reportLink}
+            onPress={() => setReportTarget({
+              type: 'activity',
+              id: activityId,
+              summary: `${activity.title} · hosted by ${activity.hostName}`,
+              author: { uid: activity.hostId, name: activity.hostName },
+            })}
+          >
+            <Ionicons name="flag-outline" size={14} color={colors.subtext} />
+            <Text style={s.reportLinkText}>Report this activity</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
+
+      <ReportSheet
+        target={reportTarget}
+        onClose={() => setReportTarget(null)}
+        onBlocked={() => navigation.goBack()}
+      />
     </SafeAreaView>
   );
 }
@@ -199,6 +238,9 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
 const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.background },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.background },
+  loadErrorText: { fontSize: 15, color: c.subtext, textAlign: 'center', paddingHorizontal: 24, marginBottom: 8 },
+  loadErrorBtn: { paddingHorizontal: 28, paddingVertical: 10 },
+  loadErrorBtnText: { fontWeight: '700', fontSize: 15 },
   hero: { paddingBottom: 24, paddingTop: 8 },
   backBtn: { padding: 16 },
   heroContent: { paddingHorizontal: 20, gap: 10 },
@@ -228,4 +270,6 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   deleteBtn: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: c.danger },
   deleteBtnText: { color: c.danger, fontWeight: '700', fontSize: 16 },
   statusText: { fontSize: 15, fontWeight: '600' },
+  reportLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 24, padding: 8 },
+  reportLinkText: { fontSize: 13, color: c.subtext },
 });

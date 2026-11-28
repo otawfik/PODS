@@ -4,10 +4,13 @@ export default {
   expo: {
     name: "PODS",
     slug: "PODS",
+    // Deep links: pods://activity/<id>, pods://pod/<id>, pods://chat/<activityId>
+    // (src/navigation/linking.ts). Takes effect in development/production builds.
+    scheme: "pods",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
-    plugins: ["expo-status-bar"],
+    plugins: ["expo-status-bar", "expo-notifications"],
     userInterfaceStyle: "automatic",
     splash: {
       image: "./assets/splash-icon.png",

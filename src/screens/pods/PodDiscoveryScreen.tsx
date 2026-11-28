@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -8,6 +8,7 @@ import { POD_CATEGORIES } from '../../constants/categories';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { getPublicPods, joinPod, joinPodWithCode } from '../../services/pods';
+import { getPodRecommendations, PodRecommendation } from '../../services/recommendations';
 import PodCard from '../../components/PodCard';
 import CategoryChip from '../../components/CategoryChip';
 
@@ -18,28 +19,36 @@ export default function PodDiscoveryScreen({ navigation }: Props) {
   const { colors } = useTheme();
   const { userProfile, refreshProfile } = useAuth();
   const [pods, setPods] = useState<Pod[]>([]);
-  const [filtered, setFiltered] = useState<Pod[]>([]);
   const [search, setSearch] = useState('');
   const [selectedCat, setSelectedCat] = useState<PodCategory | null>(null);
   const [loading, setLoading] = useState(true);
-  const [joiningId, setJoiningId] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState('');
   const [joiningWithCode, setJoiningWithCode] = useState(false);
+  const [recs, setRecs] = useState<PodRecommendation[]>([]);
+  const [recsState, setRecsState] = useState<'loading' | 'ready' | 'error'>('loading');
 
   useEffect(() => { getPublicPods().then((d) => { setPods(d); setLoading(false); }); }, []);
   useEffect(() => {
+    let cancelled = false;
+    getPodRecommendations()
+      .then((r) => { if (!cancelled) { setRecs(r); setRecsState('ready'); } })
+      .catch((err: unknown) => {
+        console.warn('Could not load recommendations', err);
+        if (!cancelled) setRecsState('error');
+      });
+    return () => { cancelled = true; };
+  }, []);
+  const filtered = useMemo(() => {
     let r = pods;
     if (selectedCat) r = r.filter((p) => p.category === selectedCat);
     if (search.trim()) { const t = search.toLowerCase(); r = r.filter((p) => p.name.toLowerCase().includes(t) || p.description.toLowerCase().includes(t)); }
-    setFiltered(r);
+    return r;
   }, [pods, search, selectedCat]);
 
   const handleJoin = async (pod: Pod) => {
     if (!userProfile) return;
-    setJoiningId(pod.podId);
     try { await joinPod(pod.podId, userProfile.uid); await refreshProfile(); navigation.navigate('PodDetail', { podId: pod.podId }); }
     catch (err: any) { Alert.alert('Error', err.message); }
-    finally { setJoiningId(null); }
   };
 
   const handleJoinWithCode = async () => {
@@ -59,6 +68,43 @@ export default function PodDiscoveryScreen({ navigation }: Props) {
   };
 
   const s = makeStyles(colors);
+
+  // Recommended pods that are still loaded and not yet joined.
+  const podsById = new Map(pods.map((p) => [p.podId, p]));
+  const recommended = recs
+    .map((r) => ({ rec: r, pod: podsById.get(r.podId) }))
+    .filter((x): x is { rec: PodRecommendation; pod: Pod } =>
+      !!x.pod && !(userProfile?.podsJoined.includes(x.rec.podId) ?? false));
+  const showRecs = !search.trim() && !selectedCat;
+  const hasInterests = (userProfile?.interests.length ?? 0) > 0;
+
+  const recommendedHeader = showRecs ? (
+    <View style={s.recsSection}>
+      <Text style={s.recsTitle}>Recommended for you</Text>
+      {recsState === 'loading' && (
+        <View style={s.recsStatus}>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={s.recsStatusText}>Finding pods that fit you...</Text>
+        </View>
+      )}
+      {recsState === 'error' && (
+        <Text style={s.recsStatusText}>Recommendations are unavailable right now.</Text>
+      )}
+      {recsState === 'ready' && recommended.length === 0 && (
+        <Text style={s.recsStatusText}>
+          {hasInterests
+            ? 'No new matches right now. Check back as more pods start.'
+            : 'Add interests on your profile to get recommendations.'}
+        </Text>
+      )}
+      {recommended.map(({ rec, pod }) => (
+        <PodCard key={`rec-${pod.podId}`} pod={pod} reason={rec.reason}
+          onPress={() => navigation.navigate('PodDetail', { podId: pod.podId })}
+          onJoin={() => handleJoin(pod)} />
+      ))}
+      <Text style={s.allTitle}>All pods</Text>
+    </View>
+  ) : null;
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
@@ -113,6 +159,7 @@ export default function PodDiscoveryScreen({ navigation }: Props) {
 
       {loading ? <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View> : (
         <FlatList data={filtered} keyExtractor={(item) => item.podId}
+          ListHeaderComponent={recommendedHeader}
           renderItem={({ item }) => {
             const isMember = userProfile?.podsJoined.includes(item.podId) ?? false;
             return (
@@ -148,6 +195,11 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   allChipSelected: { backgroundColor: c.primary },
   allChipText: { fontWeight: '600', fontSize: 13, color: c.primary },
   allChipTextSelected: { color: '#FFFFFF' },
+  recsSection: { paddingTop: 4 },
+  recsTitle: { fontSize: 17, fontWeight: '700', color: c.text, marginHorizontal: 16, marginBottom: 4 },
+  recsStatus: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginVertical: 8 },
+  recsStatusText: { fontSize: 13, color: c.subtext, marginHorizontal: 16, marginVertical: 8 },
+  allTitle: { fontSize: 17, fontWeight: '700', color: c.text, marginHorizontal: 16, marginTop: 12, marginBottom: 4 },
   empty: { alignItems: 'center', paddingTop: 60 },
   emptyText: { color: c.subtext, fontSize: 15 },
 });

@@ -1,7 +1,7 @@
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase, check } from './supabase';
+import { registerForPushNotifications, unregisterPushToken } from './notifications';
 import { User } from '../types';
-import { getUniversityFromEmail } from '../constants/categories';
 
 // ---------- Row mapping (Postgres snake_case <-> app camelCase) ----------
 
@@ -12,6 +12,8 @@ export type ProfileRow = {
   university: string;
   profile_photo: string | null;
   bio: string | null;
+  major: string;
+  interests: string[];
   join_date: string;
   pods_joined: string[];
   commendations: number;
@@ -26,6 +28,8 @@ export function toUser(row: ProfileRow): User {
     university: row.university,
     profilePhoto: row.profile_photo ?? undefined,
     bio: row.bio ?? undefined,
+    major: row.major ?? '',
+    interests: row.interests ?? [],
     joinDate: row.join_date,
     podsJoined: row.pods_joined ?? [],
     commendations: row.commendations,
@@ -51,14 +55,13 @@ export class EmailNotConfirmedError extends Error {
 export async function registerUser(
   email: string,
   password: string,
-  displayName: string
+  displayName: string,
 ): Promise<void> {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: {
-      data: { display_name: displayName, university: getUniversityFromEmail(email) },
-    },
+    // University is derived from the email on the server (handle_new_user).
+    options: { data: { display_name: displayName } },
   });
   if (error) throw new Error(error.message);
   // With email confirmation on, signing up an already-registered address
@@ -97,8 +100,56 @@ export async function loginUser(email: string, password: string): Promise<void> 
 }
 
 export async function logoutUser(): Promise<void> {
+  // While still signed in: stop pushes for this account on this device.
+  await unregisterPushToken();
   const { error } = await supabase.auth.signOut();
   if (error) throw new Error(error.message);
+}
+
+// ---------- Account deletion ----------
+
+/** What the delete-account function requires as proof of intent. */
+export const DELETE_ACCOUNT_CONFIRMATION = 'DELETE';
+
+/** The server's own explanation, when a failed function call carries one. */
+async function functionErrorMessage(error: {
+  message: string;
+  context?: unknown;
+}): Promise<string> {
+  const context = error.context;
+  if (context && typeof (context as Response).json === 'function') {
+    try {
+      const body: unknown = await (context as Response).json();
+      const message = (body as { error?: unknown } | null)?.error;
+      if (typeof message === 'string' && message) return message;
+    } catch {
+      // Not JSON: fall through to the generic message.
+    }
+  }
+  return error.message;
+}
+
+/**
+ * Permanently delete the signed-in user's account through the
+ * `delete-account` Edge Function (supabase/functions/delete-account), then
+ * clear the local session so the app returns to the sign-in screens.
+ * Throws, leaving the user signed in, if the server could not delete it.
+ */
+export async function deleteAccount(): Promise<void> {
+  // While still signed in: stop pushes for this account on this device.
+  await unregisterPushToken();
+  const { error } = await supabase.functions.invoke<{ deleted: boolean }>('delete-account', {
+    method: 'POST',
+    body: { confirm: DELETE_ACCOUNT_CONFIRMATION },
+  });
+  if (error) {
+    // The account is still there, so this device should keep getting pushes.
+    void registerForPushNotifications({ prompt: false });
+    throw new Error(await functionErrorMessage(error));
+  }
+  // The server-side session died with the account; only local state is left.
+  // A failure here must not look like a failed deletion.
+  await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
 }
 
 // ---------- Password reset (code-based) ----------
@@ -113,7 +164,7 @@ export async function sendPasswordResetCode(email: string): Promise<void> {
 export async function resetPasswordWithCode(
   email: string,
   code: string,
-  newPassword: string
+  newPassword: string,
 ): Promise<void> {
   const { error: verifyError } = await supabase.auth.verifyOtp({
     email,
@@ -128,30 +179,29 @@ export async function resetPasswordWithCode(
 // ---------- Profiles ----------
 
 /**
- * Self-heal: if a user is authed but their profile row is missing, create a
- * minimal one instead of leaving the app in a permanent loading state.
+ * Self-heal: if a user is authed but their profile row is missing, the
+ * server creates a minimal one (ensure_profile) instead of leaving the app in
+ * a permanent loading state. Email and university come from the verified
+ * auth record, never from the client.
  */
 export async function ensureUserProfile(authUser: SupabaseUser): Promise<User> {
   const existing = await getUserProfile(authUser.id);
   if (existing) return existing;
-  const email = authUser.email ?? '';
-  const meta = (authUser.user_metadata ?? {}) as { display_name?: string };
-  const row = check(
-    await supabase
-      .from('profiles')
-      .upsert(
-        {
-          id: authUser.id,
-          display_name: meta.display_name || 'Member',
-          email,
-          university: getUniversityFromEmail(email),
-        },
-        { onConflict: 'id' }
-      )
-      .select()
-      .single()
-  );
+  const row = check(await supabase.rpc('ensure_profile').single());
   return toUser(row as ProfileRow);
+}
+
+/**
+ * Load several profiles in one query. Missing ids are simply absent from
+ * the result, which is keyed by uid.
+ */
+export async function getUserProfiles(uids: string[]): Promise<Record<string, User>> {
+  const unique = [...new Set(uids)];
+  if (unique.length === 0) return {};
+  const rows = check(await supabase.from('profiles').select('*').in('id', unique));
+  const byId: Record<string, User> = {};
+  for (const row of rows as ProfileRow[]) byId[row.id] = toUser(row);
+  return byId;
 }
 
 export async function getUserProfile(uid: string): Promise<User | null> {
@@ -159,16 +209,18 @@ export async function getUserProfile(uid: string): Promise<User | null> {
   return row ? toUser(row as ProfileRow) : null;
 }
 
-export async function updateUserProfile(uid: string, updates: Partial<User>): Promise<void> {
+/** The profile fields a user may edit. Identity columns are server-owned. */
+export type EditableProfile = Partial<
+  Pick<User, 'displayName' | 'bio' | 'profilePhoto' | 'major' | 'interests'>
+>;
+
+export async function updateUserProfile(uid: string, updates: EditableProfile): Promise<void> {
   const row: Partial<ProfileRow> = {};
   if (updates.displayName !== undefined) row.display_name = updates.displayName;
-  if (updates.email !== undefined) row.email = updates.email;
-  if (updates.university !== undefined) row.university = updates.university;
   if (updates.profilePhoto !== undefined) row.profile_photo = updates.profilePhoto;
   if (updates.bio !== undefined) row.bio = updates.bio;
-  if (updates.podsJoined !== undefined) row.pods_joined = updates.podsJoined;
-  if (updates.commendations !== undefined) row.commendations = updates.commendations;
-  if (updates.postsCount !== undefined) row.posts_count = updates.postsCount;
+  if (updates.major !== undefined) row.major = updates.major;
+  if (updates.interests !== undefined) row.interests = updates.interests;
   if (Object.keys(row).length > 0) {
     check(await supabase.from('profiles').update(row).eq('id', uid));
   }

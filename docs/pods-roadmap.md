@@ -24,8 +24,8 @@ Verified: the migration was tested against a local Postgres with fake users (pri
 
 **Known gaps carried into Phase 2** (both were also true on Firebase):
 
-- **Domain restriction is client-side only.** The app checks for `.edu`, but the server accepts any email. The emailed code proves ownership of the address, but the "BU emails only" auth hook (Phase 2 step 3) isn't in yet.
-- **Expiry is still lazy.** An activity flips to `expired` (and its chat is cleared) when someone opens it after the deadline. The `pg_cron` job (Phase 2 step 6) will make it automatic.
+- **Domain restriction.** *(Nov 17: done.)* `public.hook_before_user_created` rejects non-`.edu` sign-ups on the server (plus an allowlist table for store-review accounts). It must be switched on once in Dashboard → Authentication → Hooks. University is now derived from the email server-side, and clients can no longer edit `university`/`email` on their profile (that was a hole: RLS trusts `university`).
+- **Expiry.** *(Nov 17: done.)* A `pg_cron` job runs `expire_due_activities()` every minute. Chat is still deleted at expiry rather than 24 h later.
 - **Schema is still the array-based port** (`pods.members`, `activities.participants` as arrays), not the relational v1 schema (`pod_members`, `join_requests`, `activity_participants`, `universities`, …).
 
 **Operational notes.** Supabase project ref `utnezmiwsftmcijwuika` (free plan). Free projects pause after about a week without activity — un-pause from the dashboard. The old Firebase project is unused and should be deleted (see §6).
@@ -188,7 +188,7 @@ Goal: a secure backend with the real data model, verification, expiry, chat, pus
 6. **Expiry.** `pg_cron` job every minute: mark activities `expired` when `expires_at < now()`, mark their pending `join_requests` as `expired`, lock their chat; an hourly job deletes messages from rooms expired > 24 h (the chat then disappears from inbox and detail); expired activities themselves are kept 30 days for the moderation window, then pruned. Activities are editable by the host only while `starts_at > now()` (enforced in the update RPC). *(Today: expiry happens lazily via `expire_activity_if_needed`, and the chat is deleted immediately rather than after 24 h.)*
 7. **Realtime.** Enable Realtime on `messages`, `join_requests`, `activity_participants` so chat, pending badges, and spot counts update live.
 8. **Storage.** `avatars` bucket, public-read, write restricted to own path; images resized on the client before upload (~512 px).
-9. **Push.** Table triggers → `pg_net` HTTP call to an Edge Function → Expo Push API. Events: new join request (to host), request decided (to requester), new activity in a pod you're in (respecting `pod_members.muted` — per-pod mute is in), new message in an activity chat when app is backgrounded.
+9. **Push.** Table triggers → `pg_net` HTTP call to an Edge Function → Expo Push API. Events: new join request (to host), request decided (to requester), new activity in a pod you're in (respecting `pod_members.muted` — per-pod mute is in), new message in an activity chat when app is backgrounded. *(Nov 18: done except chat messages and per-pod mute — triggers on `activities` → `notification_outbox` → `pg_net` → `send-push` → Expo; see README.)* *(Nov 23: chat-message pushes, collapsed per room, and per-pod mute added in `20261123000200_chat_push_and_mute.sql`; mutes live in a `pod_mutes` table because members are still an array.)*
 10. **Seed & test data.** A seed script creating BU, ~8 pods, ~20 fake users, activities in every state, so the UI can be built against realistic data.
 11. **Delete the Firebase project** once the app no longer references it. *(The app no longer references it as of Oct 9 — delete now.)*
 
@@ -211,7 +211,7 @@ Goal: every screen rebuilt on the new components, talking to Supabase, with load
 4. **Navigation restructure** to the new IA (Home / Pods / Create / Inbox / Profile), single definition of shared screens, typed routes, deep-link config (`pods://activity/123`) so push notifications open the right screen.
 5. **Screens**, in dependency order: Home feed (My Pods / Campus segments) → Activity detail → Create activity (pod or campus) → Join requests → Pods list → Explore → Pod detail (public preview for non-members) → Create pod → Pod settings (member posting toggle, mute, admin role labels, remove member) → Chat (incl. ended state) → Inbox → Profile → Edit profile → Other-user profile → Report sheet → Settings/blocked users.
 6. **Realtime wiring:** chat (*done for the current screens*), pending badge, spot counts.
-7. **Push registration** on first launch after login (ask permission at a moment that makes sense — after the first join request, not on the welcome screen).
+7. **Push registration** on first launch after login (ask permission at a moment that makes sense — after the first join request, not on the welcome screen). *(Nov 18: done in `src/services/notifications.ts`; tap-to-open needs the deep-link config from step 4.)* *(Nov 23: tap-to-open done — `pods://activity|pod|chat/<id>` in `src/navigation/linking.ts`, on the current navigators; redo the route table with the IA restructure in step 4.)*
 8. **Error & offline handling:** global error boundary, toast for failures, retry on network error, "you're offline" banner.
 9. **Accessibility pass:** labels on icon buttons, 44 pt touch targets, Dynamic Type doesn't break layouts, contrast ≥ 4.5:1 (checked from the tokens).
 
@@ -226,11 +226,11 @@ Each bullet is 1–4 work packages. Verification is a scripted walkthrough per s
 
 These aren't optional: Apple's guideline 1.2 requires user-generated-content apps to have content filtering, a report mechanism, a block mechanism, and a published way to contact you; Google Play has the equivalent UGC policy.
 
-1. **Report** any user, pod, activity, or message (reason picker + free text) → `reports` table → email to a moderation inbox you check.
-2. **Block** hides the other user's content in both directions and prevents them joining your activities; Blocked Users list in settings.
+1. **Report** any user, pod, activity, or message (reason picker + free text) → `reports` table → email to a moderation inbox you check. *(Nov 23: the report sheet, `report_content` RPC and `reports` table are done, with a content snapshot and a 20-per-day limit. Not done: the email to a moderation inbox; reports are read in the Supabase table editor.)*
+2. **Block** hides the other user's content in both directions and prevents them joining your activities; Blocked Users list in settings. *(Nov 23: done in RLS for chat messages and university-wide activities, plus join requests and pushes; the list is on the Profile screen. Pods, member lists and profiles stay visible, and existing participants are not removed, in line with decision 13.)*
 3. **Moderation admin:** simplest version is the Supabase dashboard plus a saved SQL view of open reports; a tiny internal web page can come later.
 4. **Community guidelines + Terms of Service + Privacy Policy** pages (in-app and at a public URL). I'll draft them; have someone sanity-check them — I'm not a lawyer.
-5. **Account deletion** inside the app (Apple requires it) — an RPC that anonymizes the profile and removes auth.
+5. **Account deletion** inside the app (Apple requires it) — **built** (`delete-account` Edge Function + `delete_account_data`): hard-deletes the profile, auth user, hosted activities and sent messages, and removes the user from every pod/activity; a pod left without an admin goes to its longest-standing member. Still to do for the stores: a public web page for requesting deletion (Google Play requires a URL).
 6. **Basic content filtering:** a profanity/slur list check on pod names, activity titles, and messages, done in a Postgres function; not perfect, but it satisfies the "filter" requirement.
 7. **Rate limits** on activity creation, join requests, and messages to blunt spam (a simple per-user counter in Postgres).
 8. **Reliability (from the pilot wedge, §1b):** host marks attendance after an activity ends (`activity_participants.attended`); profile shows a reliability signal (kudos + attendance) instead of raw counts; a `no_show_count` in the last 30 days ≥ 2 puts a 7-day cooldown on new join requests, enforced in the `request_join` RPC with a friendly message. Not a public shaming mechanic — the count is private, only the cooldown is visible to the user it applies to.

@@ -6,6 +6,11 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { logoutUser, updateUserProfile } from '../../services/auth';
 import AvatarInitials from '../../components/AvatarInitials';
+import DeleteAccountModal from '../../components/DeleteAccountModal';
+import BlockedUsersSection from '../../components/BlockedUsersSection';
+import { INTEREST_SUGGESTIONS } from '../../constants/categories';
+
+const MAX_INTERESTS = 20;
 
 export default function ProfileScreen() {
   const { colors, isDark, toggleTheme } = useTheme();
@@ -13,13 +18,43 @@ export default function ProfileScreen() {
   const [editing, setEditing] = useState(false);
   const [bio, setBio] = useState(userProfile?.bio ?? '');
   const [displayName, setDisplayName] = useState(userProfile?.displayName ?? '');
+  const [major, setMajor] = useState(userProfile?.major ?? '');
+  const [interests, setInterests] = useState<string[]>(userProfile?.interests ?? []);
+  const [customInterest, setCustomInterest] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleteVisible, setDeleteVisible] = useState(false);
 
   if (!userProfile) return null;
 
+  const startEditing = () => {
+    setBio(userProfile.bio ?? '');
+    setDisplayName(userProfile.displayName);
+    setMajor(userProfile.major);
+    setInterests(userProfile.interests);
+    setEditing(true);
+  };
+
+  const toggleInterest = (label: string) => {
+    setInterests((cur) => {
+      const has = cur.some((i) => i.toLowerCase() === label.toLowerCase());
+      if (has) return cur.filter((i) => i.toLowerCase() !== label.toLowerCase());
+      return cur.length >= MAX_INTERESTS ? cur : [...cur, label];
+    });
+  };
+
+  const addCustomInterest = () => {
+    const label = customInterest.trim().slice(0, 30);
+    if (label && !interests.some((i) => i.toLowerCase() === label.toLowerCase())) toggleInterest(label);
+    setCustomInterest('');
+  };
+
   const handleSave = async () => {
     setSaving(true);
-    try { await updateUserProfile(userProfile.uid, { bio, displayName }); await refreshProfile(); setEditing(false); }
+    try {
+      await updateUserProfile(userProfile.uid, { bio, displayName, major: major.trim(), interests });
+      await refreshProfile();
+      setEditing(false);
+    }
     catch (err: any) { Alert.alert('Error', err.message); }
     finally { setSaving(false); }
   };
@@ -96,6 +131,48 @@ export default function ProfileScreen() {
         </View>
 
         <View style={s.section}>
+          <Text style={s.sectionTitle}>Major</Text>
+          {editing ? (
+            <TextInput style={s.textInput} value={major} onChangeText={setMajor}
+              placeholder="e.g. Computer Science" placeholderTextColor={colors.subtext} maxLength={80} />
+          ) : (
+            <Text style={s.bioText}>{userProfile.major || 'Not set'}</Text>
+          )}
+        </View>
+
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>Interests</Text>
+          {editing ? (
+            <>
+              <View style={s.chipWrap}>
+                {[...new Set([...INTEREST_SUGGESTIONS, ...interests])].map((label) => {
+                  const on = interests.some((i) => i.toLowerCase() === label.toLowerCase());
+                  return (
+                    <TouchableOpacity key={label} style={[s.chip, on && s.chipOn]} onPress={() => toggleInterest(label)}>
+                      <Text style={[s.chipText, on && s.chipTextOn]}>{label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <TextInput style={s.textInput} value={customInterest} onChangeText={setCustomInterest}
+                onSubmitEditing={addCustomInterest} returnKeyType="done" maxLength={30}
+                placeholder="Add your own and press return" placeholderTextColor={colors.subtext} />
+              <Text style={s.hint}>{interests.length}/{MAX_INTERESTS} · used to recommend pods</Text>
+            </>
+          ) : userProfile.interests.length ? (
+            <View style={s.chipWrap}>
+              {userProfile.interests.map((label) => (
+                <View key={label} style={[s.chip, s.chipOn]}>
+                  <Text style={[s.chipText, s.chipTextOn]}>{label}</Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={s.bioText}>Add interests to get pod recommendations.</Text>
+          )}
+        </View>
+
+        <View style={s.section}>
           <Text style={s.sectionTitle}>Account</Text>
           {[
             { label: 'Email', value: userProfile.email },
@@ -108,6 +185,8 @@ export default function ProfileScreen() {
           ))}
         </View>
 
+        {!editing && <BlockedUsersSection />}
+
         {editing ? (
           <View style={s.editActions}>
             <TouchableOpacity style={s.cancelBtn} onPress={() => setEditing(false)}>
@@ -118,12 +197,20 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          <TouchableOpacity style={s.editBtn} onPress={() => setEditing(true)}>
+          <TouchableOpacity style={s.editBtn} onPress={startEditing}>
             <Ionicons name="pencil" size={16} color={colors.primary} />
             <Text style={s.editBtnText}>Edit Profile</Text>
           </TouchableOpacity>
         )}
+
+        {!editing && (
+          <TouchableOpacity style={s.deleteBtn} onPress={() => setDeleteVisible(true)} testID="delete-account-open">
+            <Ionicons name="trash-outline" size={16} color={colors.danger} />
+            <Text style={s.deleteBtnText}>Delete account</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
+      <DeleteAccountModal visible={deleteVisible} onClose={() => setDeleteVisible(false)} />
     </SafeAreaView>
   );
 }
@@ -150,6 +237,13 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   sectionTitle: { fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 12 },
   bioText: { fontSize: 15, color: c.text, lineHeight: 22 },
   bioInput: { backgroundColor: c.inputBackground, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, color: c.text, borderWidth: 1.5, borderColor: c.primary, height: 90, textAlignVertical: 'top' },
+  textInput: { backgroundColor: c.inputBackground, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, color: c.text, borderWidth: 1.5, borderColor: c.border },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1.5, borderColor: c.border },
+  chipOn: { backgroundColor: c.primaryGlow, borderColor: c.primary },
+  chipText: { fontSize: 13, color: c.subtext, fontWeight: '500' },
+  chipTextOn: { color: c.primary, fontWeight: '600' },
+  hint: { fontSize: 12, color: c.subtext, marginTop: 6 },
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: c.border },
   infoLabel: { fontSize: 14, color: c.subtext },
   infoValue: { fontSize: 14, fontWeight: '500', color: c.text, flex: 1, textAlign: 'right' },
@@ -160,4 +254,6 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   saveBtnText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
   editBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: c.primary, borderRadius: 12, paddingVertical: 14, gap: 8, marginTop: 8 },
   editBtnText: { fontSize: 15, fontWeight: '600', color: c.primary },
+  deleteBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 8, marginTop: 24 },
+  deleteBtnText: { fontSize: 14, fontWeight: '600', color: c.danger },
 });
