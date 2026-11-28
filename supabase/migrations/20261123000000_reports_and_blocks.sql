@@ -187,6 +187,11 @@ begin
   if public.is_blocked_with(v_act.host_id) and not (v_uid = any (v_act.participants)) then
     raise exception 'Activity not found';
   end if;
+  -- Also in 20261122000000_rpc_guards.sql; repeated because this definition
+  -- runs later and replaces that one.
+  if v_act.status <> 'active' or v_act.expires_at < now() then
+    raise exception 'This activity has ended';
+  end if;
   if v_act.auto_approve then
     perform public._approve_participant(p_activity_id, v_uid);
     return;
