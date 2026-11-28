@@ -183,3 +183,73 @@ test('deleting an account also clears its blocks, mutes and tokens; reports surv
   assert.ok(!pod.members.includes(gone));
   assert.equal(pod.member_count, pod.members.length);
 });
+
+test('emails are readable only by the owner path and by pod-mates', async () => {
+  // Direct reads of the column are refused for everyone, including yourself.
+  await assert.rejects(
+    rpc(ids.cat, `select email from public.profiles where id = $1`, [ids.dan]),
+    /permission denied/,
+  );
+  await assert.rejects(rpc(ids.cat, `select * from public.profiles`), /permission denied/);
+  // The rest of a profile is still readable.
+  const { rows } = await rpc(
+    ids.cat,
+    `select display_name, university from public.profiles where id = $1`,
+    [ids.dan],
+  );
+  assert.deepEqual(rows, [{ display_name: 'Dan', university: 'Boston University' }]);
+
+  // Pod-mates get each other's emails through the RPC.
+  const mates = await rpc(ids.cat, `select * from public.get_pod_member_emails($1)`, [podId]);
+  const byId = Object.fromEntries(mates.rows.map((r) => [r.profile_id, r.email]));
+  assert.equal(byId[ids.dan], 'dan@bu.edu');
+  assert.equal(byId[ids.cat], 'cat@bu.edu');
+
+  // Someone outside the pod gets nothing.
+  const outsider = '00000000-0000-0000-0000-0000000000c8';
+  await t.signUp(outsider, 'outsider@harvard.edu', { display_name: 'Out' });
+  await assert.rejects(
+    rpc(outsider, `select * from public.get_pod_member_emails($1)`, [podId]),
+    /Only pod members/,
+  );
+
+  // A block hides the pair's emails from each other, not from the rest.
+  await rpc(ids.ben, `select public.block_user($1)`, [ids.ana]);
+  const forAna = await rpc(ids.ana, `select * from public.get_pod_member_emails($1)`, [podId]);
+  const anaSees = forAna.rows.map((r) => r.profile_id);
+  assert.ok(!anaSees.includes(ids.ben));
+  assert.ok(anaSees.includes(ids.cat) && anaSees.includes(ids.ana));
+});
+
+test('chat previews return the latest readable message per activity', async () => {
+  const mine = await createActivity(ids.ana, { auto: true });
+  const notMine = await createActivity(ids.ana, { auto: true });
+  await rpc(ids.cat, `select public.request_join_activity($1)`, [mine]);
+  await rpc(ids.dan, `select public.request_join_activity($1)`, [notMine]);
+  const say = (uid, act, text, minutesAgo) =>
+    t.db.query(
+      `insert into public.messages (activity_id, sender_id, sender_name, message, created_at)
+       values ($1, $2, $3, $4, now() - make_interval(mins => $5))`,
+      [act, uid, names[uid], text, minutesAgo],
+    );
+  await say(ids.ana, mine, 'first', 10);
+  await say(ids.cat, mine, 'latest', 1);
+  await say(ids.dan, notMine, 'private to that activity', 1);
+
+  const previews = async (uid) =>
+    (await rpc(uid, `select * from public.get_chat_previews($1)`, [[mine, notMine]])).rows;
+
+  // Cat is only in `mine`: one row, the newest message.
+  const forCat = await previews(ids.cat);
+  assert.equal(forCat.length, 1);
+  assert.equal(forCat[0].activity_id, mine);
+  assert.equal(forCat[0].message, 'latest');
+  assert.equal(forCat[0].sender_name, 'Cat');
+
+  // A block hides the blocked sender's message, so the preview falls back.
+  await rpc(ids.ana, `select public.block_user($1)`, [ids.cat]);
+  const forAna = (await previews(ids.ana)).find((p) => p.activity_id === mine);
+  assert.equal(forAna.message, 'first');
+
+  await t.db.query(`delete from public.activities where id = any ($1)`, [[mine, notMine]]);
+});

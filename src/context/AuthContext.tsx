@@ -41,7 +41,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshProfile = useCallback(async () => {
     if (authUser) {
       const profile = await getUserProfile(authUser.id);
-      setUserProfile(profile);
+      // The profile row no longer exposes email; the session has the user's own.
+      setUserProfile(profile ? { ...profile, email: authUser.email ?? '' } : null);
     }
   }, [authUser]);
 
@@ -64,7 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // instead of a permanent loading spinner.
         const profile = await ensureUserProfile(user);
         loadedUserId.current = user.id;
-        setUserProfile(profile);
+        setUserProfile({ ...profile, email: user.email ?? '' });
         // Refresh this device's push token if permission was granted before.
         // Never prompts here; see askForPushAfterAction.
         void registerForPushNotifications({ prompt: false });

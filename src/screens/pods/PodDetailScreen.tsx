@@ -14,7 +14,7 @@ import {
   getPod, joinPod, leavePod, grantAdmin, removeAdmin, updatePod, deletePod, isPodMuted, setPodMute,
 } from '../../services/pods';
 import { podChatKey, setActiveChat } from '../../services/notifications';
-import { getUserProfiles } from '../../services/auth';
+import { getPodMemberEmails, getUserProfiles } from '../../services/auth';
 import { getActivitiesForPod, requestJoinActivity } from '../../services/activities';
 import { sendPodMessage, subscribeToPodMessages } from '../../services/chat';
 import { POD_CATEGORIES } from '../../constants/categories';
@@ -23,6 +23,8 @@ import CategoryChip from '../../components/CategoryChip';
 import ActivityCard from '../../components/ActivityCard';
 import AvatarInitials from '../../components/AvatarInitials';
 import MessageBubble from '../../components/MessageBubble';
+import DaySeparator from '../../components/DaySeparator';
+import { buildChatItems } from '../../utils/chatLayout';
 import KeyboardAwareView from '../../components/KeyboardAwareView';
 import ReportSheet, { ReportTarget } from '../../components/ReportSheet';
 import { blockUser } from '../../services/moderation';
@@ -54,6 +56,7 @@ export default function PodDetailScreen({ navigation, route }: Props) {
 
   // Members state
   const [memberProfiles, setMemberProfiles] = useState<Record<string, User>>({});
+  const [memberEmails, setMemberEmails] = useState<Record<string, string>>({});
   const [selectedMember, setSelectedMember] = useState<User | null>(null);
   const [memberModalVisible, setMemberModalVisible] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
@@ -131,6 +134,12 @@ export default function PodDetailScreen({ navigation, route }: Props) {
     getUserProfiles(pod.members)
       .then((profiles) => { if (!cancelled) setMemberProfiles(profiles); })
       .catch((err: unknown) => console.warn('Could not load member profiles', err));
+    // Emails are only shared between members of the same pod.
+    if (pod.members.includes(uid)) {
+      getPodMemberEmails(pod.podId)
+        .then((emails) => { if (!cancelled) setMemberEmails(emails); })
+        .catch((err: unknown) => console.warn('Could not load member emails', err));
+    }
     return () => { cancelled = true; };
   }, [pod?.members.length]);
 
@@ -305,15 +314,21 @@ export default function PodDetailScreen({ navigation, route }: Props) {
         <KeyboardAwareView onKeyboardShown={() => chatListRef.current?.scrollToEnd({ animated: true })}>
           <FlatList
             ref={chatListRef}
-            data={isMember ? messages : []}
-            keyExtractor={(m) => m.messageId}
-            renderItem={({ item }) => (
-              <MessageBubble
-                message={item}
-                isOwn={item.senderId === uid}
-                onLongPress={item.senderId === uid ? undefined : () => reportMessage(item)}
-              />
-            )}
+            data={buildChatItems(isMember ? messages : [], uid)}
+            keyExtractor={(item) => item.key}
+            renderItem={({ item }) =>
+              item.kind === 'day' ? (
+                <DaySeparator label={item.label} />
+              ) : (
+                <MessageBubble
+                  message={item.message}
+                  isOwn={item.isOwn}
+                  groupStart={item.groupStart}
+                  groupEnd={item.groupEnd}
+                  onLongPress={item.isOwn ? undefined : () => reportMessage(item.message)}
+                />
+              )
+            }
             contentContainerStyle={s.chatList}
             showsVerticalScrollIndicator={false}
             onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: false })}
@@ -533,7 +548,9 @@ export default function PodDetailScreen({ navigation, route }: Props) {
               <View style={s.profileSection}>
                 <AvatarInitials name={selectedMember.displayName} size={72} />
                 <Text style={[s.profileName, { color: colors.text }]}>{selectedMember.displayName}</Text>
-                <Text style={[s.profileEmail, { color: colors.subtext }]}>{selectedMember.email}</Text>
+                {memberEmails[selectedMember.uid] ? (
+                  <Text style={[s.profileEmail, { color: colors.subtext }]}>{memberEmails[selectedMember.uid]}</Text>
+                ) : null}
                 {selectedMember.university ? (
                   <Text style={[s.profileUniversity, { color: colors.primary }]}>{selectedMember.university}</Text>
                 ) : null}

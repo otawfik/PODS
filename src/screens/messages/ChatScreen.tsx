@@ -14,6 +14,8 @@ import { sendMessage, subscribeToMessages } from '../../services/chat';
 import { getActivity } from '../../services/activities';
 import { activityChatKey, setActiveChat } from '../../services/notifications';
 import MessageBubble from '../../components/MessageBubble';
+import DaySeparator from '../../components/DaySeparator';
+import { buildChatItems } from '../../utils/chatLayout';
 import ReportSheet, { ReportTarget } from '../../components/ReportSheet';
 import KeyboardAwareView from '../../components/KeyboardAwareView';
 
@@ -152,23 +154,27 @@ export default function ChatScreen({ navigation, route }: Props) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
+        <View style={[s.headerAvatar, { backgroundColor: colors.primary }]}>
+          <Text style={s.headerAvatarText}>{activityTitle.trim().charAt(0).toUpperCase() || '#'}</Text>
+        </View>
         <View style={s.headerInfo}>
           <Text style={s.headerTitle} numberOfLines={1}>{activityTitle}</Text>
-          <Text style={[s.headerCountdown, { color: isExpired ? colors.danger : colors.warning }]}>{countdown}</Text>
+          <Text style={[s.headerCountdown, { color: isExpired ? colors.danger : colors.subtext }]} numberOfLines={1}>
+            {isExpired ? 'Chat locked' : `Temporary chat · ${countdown}`}
+          </Text>
         </View>
       </View>
 
-      <View style={s.warningBanner}>
-        <Ionicons name="time-outline" size={14} color={colors.warning} />
-        <Text style={s.warningText}>Temporary chat · Messages delete when activity expires</Text>
-      </View>
-
       <KeyboardAwareView onKeyboardShown={() => flatListRef.current?.scrollToEnd({ animated: true })}>
-        <FlatList ref={flatListRef} data={messages} keyExtractor={(item) => item.messageId}
-          renderItem={({ item }) => {
-            const isOwn = item.senderId === userProfile?.uid;
-            return <MessageBubble message={item} isOwn={isOwn} onLongPress={isOwn ? undefined : () => reportMessage(item)} />;
-          }}
+        <FlatList ref={flatListRef} data={buildChatItems(messages, userProfile?.uid)} keyExtractor={(item) => item.key}
+          renderItem={({ item }) =>
+            item.kind === 'day' ? (
+              <DaySeparator label={item.label} />
+            ) : (
+              <MessageBubble message={item.message} isOwn={item.isOwn} groupStart={item.groupStart} groupEnd={item.groupEnd}
+                onLongPress={item.isOwn ? undefined : () => reportMessage(item.message)} />
+            )
+          }
           contentContainerStyle={s.messageList}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
@@ -209,8 +215,10 @@ export default function ChatScreen({ navigation, route }: Props) {
 
 const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.background },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: c.border, backgroundColor: c.card },
-  backBtn: { marginRight: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, backgroundColor: c.card },
+  backBtn: { marginRight: 8, padding: 4 },
+  headerAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  headerAvatarText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   loadState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   loadErrorText: { fontSize: 15, color: c.subtext, textAlign: 'center', marginBottom: 16 },
   retryBtn: { borderWidth: 1.5, borderColor: c.primary, borderRadius: 12, paddingHorizontal: 28, paddingVertical: 12 },
@@ -218,14 +226,12 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   headerInfo: { flex: 1 },
   headerTitle: { fontSize: 16, fontWeight: '700', color: c.text },
   headerCountdown: { fontSize: 12, marginTop: 2 },
-  warningBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(245,166,35,0.1)', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
-  warningText: { fontSize: 12, color: c.warning, flex: 1 },
-  messageList: { paddingVertical: 12, paddingBottom: 20 },
+  messageList: { paddingVertical: 8, paddingBottom: 12 },
   emptyChat: { alignItems: 'center', paddingTop: 60 },
   emptyChatIcon: { fontSize: 36, marginBottom: 12 },
   emptyChatText: { fontSize: 14 },
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, gap: 10 },
-  textInput: { flex: 1, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 100, borderWidth: 1.5 },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, gap: 8 },
+  textInput: { flex: 1, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 16, maxHeight: 110, borderWidth: StyleSheet.hairlineWidth },
   sendBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   sendBtnDisabled: { opacity: 0.4 },
   expiredBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, borderTopWidth: 1, gap: 8 },
