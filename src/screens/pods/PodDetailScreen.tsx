@@ -23,6 +23,8 @@ import CategoryChip from '../../components/CategoryChip';
 import ActivityCard from '../../components/ActivityCard';
 import AvatarInitials from '../../components/AvatarInitials';
 import MessageBubble from '../../components/MessageBubble';
+import DaySeparator from '../../components/DaySeparator';
+import { buildChatItems } from '../../utils/chatLayout';
 import KeyboardAwareView from '../../components/KeyboardAwareView';
 import ReportSheet, { ReportTarget } from '../../components/ReportSheet';
 import { blockUser } from '../../services/moderation';
@@ -312,15 +314,21 @@ export default function PodDetailScreen({ navigation, route }: Props) {
         <KeyboardAwareView onKeyboardShown={() => chatListRef.current?.scrollToEnd({ animated: true })}>
           <FlatList
             ref={chatListRef}
-            data={isMember ? messages : []}
-            keyExtractor={(m) => m.messageId}
-            renderItem={({ item }) => (
-              <MessageBubble
-                message={item}
-                isOwn={item.senderId === uid}
-                onLongPress={item.senderId === uid ? undefined : () => reportMessage(item)}
-              />
-            )}
+            data={buildChatItems(isMember ? messages : [], uid)}
+            keyExtractor={(item) => item.key}
+            renderItem={({ item }) =>
+              item.kind === 'day' ? (
+                <DaySeparator label={item.label} />
+              ) : (
+                <MessageBubble
+                  message={item.message}
+                  isOwn={item.isOwn}
+                  groupStart={item.groupStart}
+                  groupEnd={item.groupEnd}
+                  onLongPress={item.isOwn ? undefined : () => reportMessage(item.message)}
+                />
+              )
+            }
             contentContainerStyle={s.chatList}
             showsVerticalScrollIndicator={false}
             onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: false })}

@@ -14,6 +14,8 @@ import { sendMessage, subscribeToMessages } from '../../services/chat';
 import { getActivity } from '../../services/activities';
 import { activityChatKey, setActiveChat } from '../../services/notifications';
 import MessageBubble from '../../components/MessageBubble';
+import DaySeparator from '../../components/DaySeparator';
+import { buildChatItems } from '../../utils/chatLayout';
 import ReportSheet, { ReportTarget } from '../../components/ReportSheet';
 import KeyboardAwareView from '../../components/KeyboardAwareView';
 
@@ -164,11 +166,15 @@ export default function ChatScreen({ navigation, route }: Props) {
       </View>
 
       <KeyboardAwareView onKeyboardShown={() => flatListRef.current?.scrollToEnd({ animated: true })}>
-        <FlatList ref={flatListRef} data={messages} keyExtractor={(item) => item.messageId}
-          renderItem={({ item }) => {
-            const isOwn = item.senderId === userProfile?.uid;
-            return <MessageBubble message={item} isOwn={isOwn} onLongPress={isOwn ? undefined : () => reportMessage(item)} />;
-          }}
+        <FlatList ref={flatListRef} data={buildChatItems(messages, userProfile?.uid)} keyExtractor={(item) => item.key}
+          renderItem={({ item }) =>
+            item.kind === 'day' ? (
+              <DaySeparator label={item.label} />
+            ) : (
+              <MessageBubble message={item.message} isOwn={item.isOwn} groupStart={item.groupStart} groupEnd={item.groupEnd}
+                onLongPress={item.isOwn ? undefined : () => reportMessage(item.message)} />
+            )
+          }
           contentContainerStyle={s.messageList}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
