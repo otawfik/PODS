@@ -14,6 +14,7 @@ import { sendMessage, subscribeToMessages } from '../../services/chat';
 import { getActivity } from '../../services/activities';
 import { activityChatKey, setActiveChat } from '../../services/notifications';
 import MessageBubble from '../../components/MessageBubble';
+import ReportSheet, { ReportTarget } from '../../components/ReportSheet';
 import KeyboardAwareView from '../../components/KeyboardAwareView';
 
 type Props = {
@@ -44,6 +45,9 @@ export default function ChatScreen({ navigation, route }: Props) {
   const [loadFailure, setLoadFailure] = useState<{ id: string; message: string } | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const needsLoad = !titleParam || !expiresAtParam;
+  const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
+  // Bumped after a block so the chat reloads without the blocked user's messages.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!needsLoad) return;
@@ -99,7 +103,15 @@ export default function ChatScreen({ navigation, route }: Props) {
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     });
     return unsub;
-  }, [activityId]);
+  }, [activityId, reloadKey]);
+
+  const reportMessage = (m: Message) =>
+    setReportTarget({
+      type: 'message',
+      id: m.messageId,
+      summary: `${m.senderName}: ${m.message}`,
+      author: { uid: m.senderId, name: m.senderName },
+    });
 
   const handleSend = async () => {
     if (!text.trim() || !userProfile || isExpired) return;
@@ -153,7 +165,10 @@ export default function ChatScreen({ navigation, route }: Props) {
 
       <KeyboardAwareView onKeyboardShown={() => flatListRef.current?.scrollToEnd({ animated: true })}>
         <FlatList ref={flatListRef} data={messages} keyExtractor={(item) => item.messageId}
-          renderItem={({ item }) => <MessageBubble message={item} isOwn={item.senderId === userProfile?.uid} />}
+          renderItem={({ item }) => {
+            const isOwn = item.senderId === userProfile?.uid;
+            return <MessageBubble message={item} isOwn={isOwn} onLongPress={isOwn ? undefined : () => reportMessage(item)} />;
+          }}
           contentContainerStyle={s.messageList}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
@@ -182,6 +197,12 @@ export default function ChatScreen({ navigation, route }: Props) {
           </View>
         )}
       </KeyboardAwareView>
+
+      <ReportSheet
+        target={reportTarget}
+        onClose={() => setReportTarget(null)}
+        onBlocked={() => setReloadKey((k) => k + 1)}
+      />
     </SafeAreaView>
   );
 }

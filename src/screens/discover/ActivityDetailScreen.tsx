@@ -12,6 +12,7 @@ import { getActivity, requestJoinActivity, leaveActivity, deleteActivity } from 
 import { getUserProfiles } from '../../services/auth';
 import CategoryChip from '../../components/CategoryChip';
 import AvatarInitials from '../../components/AvatarInitials';
+import ReportSheet, { ReportTarget } from '../../components/ReportSheet';
 
 type AnyStackWithActivityDetail = {
   ActivityDetail: { activityId: string };
@@ -32,6 +33,7 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [participantProfiles, setParticipantProfiles] = useState<Record<string, User>>({});
+  const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -207,7 +209,28 @@ export default function ActivityDetailScreen({ navigation, route }: Props) {
         </View>
 
         <View style={s.actionContainer}>{renderActionButton()}</View>
+
+        {!isHost && (
+          <TouchableOpacity
+            style={s.reportLink}
+            onPress={() => setReportTarget({
+              type: 'activity',
+              id: activityId,
+              summary: `${activity.title} · hosted by ${activity.hostName}`,
+              author: { uid: activity.hostId, name: activity.hostName },
+            })}
+          >
+            <Ionicons name="flag-outline" size={14} color={colors.subtext} />
+            <Text style={s.reportLinkText}>Report this activity</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
+
+      <ReportSheet
+        target={reportTarget}
+        onClose={() => setReportTarget(null)}
+        onBlocked={() => navigation.goBack()}
+      />
     </SafeAreaView>
   );
 }
@@ -247,4 +270,6 @@ const makeStyles = (c: ReturnType<typeof useTheme>['colors']) => StyleSheet.crea
   deleteBtn: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: c.danger },
   deleteBtnText: { color: c.danger, fontWeight: '700', fontSize: 16 },
   statusText: { fontSize: 15, fontWeight: '600' },
+  reportLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 24, padding: 8 },
+  reportLinkText: { fontSize: 13, color: c.subtext },
 });

@@ -49,6 +49,10 @@ Pods are lightweight, purpose-built groups with a shelf life. You open the app, 
 - Editable profiles with major and interests
 - In-app account deletion (Profile → Delete account): removes the profile, sign-in, hosted activities and sent messages, and takes the user out of every pod and activity
 
+**Safety**
+- Report a user, pod, activity or chat message (long-press a message) with a reason
+- Block a user: you stop seeing each other's messages and campus activities, they can't join yours, and neither of you gets pushes about the other; manage the list under Profile → Blocked users
+
 **Polish**
 - Cross-platform: iOS, Android, and web from a single codebase
 - Light and dark mode
@@ -170,6 +174,16 @@ request / approve / decline / create activity (RPCs)
 
 ---
 
+## How report and block work
+
+Everything is enforced in Postgres (`supabase/migrations/20261123000000_reports_and_blocks.sql`); the app only calls three RPCs through `src/services/moderation.ts`.
+
+- **Block** (`block_user` / `unblock_user`, table `blocks`). Works in both directions and is checked by Row Level Security, so it also covers Realtime: neither person reads the other's chat messages; neither sees the other's university-wide activities (unless they already hold a spot, so they can still leave); neither can request to join the other's activities, and pending requests between them are withdrawn; push recipients who have a block with the person who caused the event are dropped. Pods, member lists and profiles stay visible, and people already in each other's activities are not removed. You can read only the blocks you made; the blocked person is not told.
+- **Report** (`report_content`, table `reports`). Targets: `user`, `pod`, `activity`, `message`; reasons come from a fixed list. You can only report something you can see. The row keeps a snapshot of the content (message text and sender, activity title, pod name), because activity chats are deleted at expiry. Reporting the same thing twice returns the open report; the limit is 20 new reports per user per 24 hours. The app can never read reports.
+- **Reviewing reports.** There is no admin screen yet. Open Dashboard → Table editor → `reports`, filter `status = open`, and set `status` to `reviewing`, `resolved` or `dismissed` by hand. Acting on a report (removing content, banning a user) is also manual for now.
+
+---
+
 ## Testing
 
 ```bash
@@ -188,7 +202,7 @@ CI (`.github/workflows/ci.yml`) runs all of these on every PR, plus a Deno type-
 src/
   components/    Reusable UI (PodCard, ActivityCard, MessageBubble, ...)
   screens/       Auth, Discover, Pods, Activities, Messages, Profile
-  services/      Supabase-backed data layer (auth, pods, activities, chat, recommendations)
+  services/      Supabase-backed data layer (auth, pods, activities, chat, recommendations, moderation)
   navigation/    Stack and tab navigators
   context/       Auth and theme providers
   constants/     Categories, tags, colors
