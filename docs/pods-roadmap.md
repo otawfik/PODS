@@ -226,8 +226,8 @@ Each bullet is 1–4 work packages. Verification is a scripted walkthrough per s
 
 These aren't optional: Apple's guideline 1.2 requires user-generated-content apps to have content filtering, a report mechanism, a block mechanism, and a published way to contact you; Google Play has the equivalent UGC policy.
 
-1. **Report** any user, pod, activity, or message (reason picker + free text) → `reports` table → email to a moderation inbox you check.
-2. **Block** hides the other user's content in both directions and prevents them joining your activities; Blocked Users list in settings.
+1. **Report** any user, pod, activity, or message (reason picker + free text) → `reports` table → email to a moderation inbox you check. *(Nov 23: the report sheet, `report_content` RPC and `reports` table are done, with a content snapshot and a 20-per-day limit. Not done: the email to a moderation inbox; reports are read in the Supabase table editor.)*
+2. **Block** hides the other user's content in both directions and prevents them joining your activities; Blocked Users list in settings. *(Nov 23: done in RLS for chat messages and university-wide activities, plus join requests and pushes; the list is on the Profile screen. Pods, member lists and profiles stay visible, and existing participants are not removed, in line with decision 13.)*
 3. **Moderation admin:** simplest version is the Supabase dashboard plus a saved SQL view of open reports; a tiny internal web page can come later.
 4. **Community guidelines + Terms of Service + Privacy Policy** pages (in-app and at a public URL). I'll draft them; have someone sanity-check them — I'm not a lawyer.
 5. **Account deletion** inside the app (Apple requires it) — an RPC that anonymizes the profile and removes auth.
