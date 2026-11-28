@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -6,7 +6,7 @@ import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../context/ThemeContext';
 import { getActivity, approveJoinRequest, rejectJoinRequest } from '../../services/activities';
-import { getUserProfile } from '../../services/auth';
+import { getUserProfiles } from '../../services/auth';
 import { User, Activity } from '../../types';
 import AvatarInitials from '../../components/AvatarInitials';
 
@@ -28,8 +28,9 @@ export default function JoinRequestsScreen({ navigation, route }: Props) {
     const act = await getActivity(activityId);
     setActivity(act);
     if (act) {
-      const users = await Promise.all(act.pendingRequests.map((uid) => getUserProfile(uid)));
-      setRequesters(users.filter(Boolean) as User[]);
+      const byId = await getUserProfiles(act.pendingRequests);
+      // Keep request order.
+      setRequesters(act.pendingRequests.map((uid) => byId[uid]).filter((u): u is User => !!u));
     }
     setLoading(false);
   };

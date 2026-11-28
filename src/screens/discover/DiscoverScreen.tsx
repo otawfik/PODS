@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator,
@@ -10,11 +10,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { DiscoverStackParamList, Activity, Pod } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { getActivitiesForPods, getUniversityActivities } from '../../services/activities';
+import { getActivitiesForPods, getUniversityActivities, requestJoinActivity } from '../../services/activities';
 import { getPublicPods, joinPod } from '../../services/pods';
 import { getUserProfile } from '../../services/auth';
 import ActivityCard from '../../components/ActivityCard';
-import { requestJoinActivity } from '../../services/activities';
 
 type Props = { navigation: NativeStackNavigationProp<DiscoverStackParamList, 'DiscoverFeed'> };
 
@@ -89,7 +88,7 @@ export default function DiscoverScreen({ navigation }: Props) {
 
   if (loading) return <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
 
-  const ListHeader = () => (
+  const listHeader = (
     <>
       {discoverPods.length > 0 && (
         <View style={s.shelfSection}>
@@ -155,7 +154,7 @@ export default function DiscoverScreen({ navigation }: Props) {
             onPress={() => navigation.navigate('ActivityDetail', { activityId: item.activityId })}
             onRequestJoin={() => handleRequestJoin(item.activityId)} />
         )}
-        ListHeaderComponent={<ListHeader />}
+        ListHeaderComponent={listHeader}
         ListEmptyComponent={
           <View style={s.empty}>
             <Text style={s.emptyIcon}>🏘️</Text>

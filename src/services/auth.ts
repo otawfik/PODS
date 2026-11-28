@@ -145,6 +145,19 @@ export async function ensureUserProfile(authUser: SupabaseUser): Promise<User> {
   return toUser(row as ProfileRow);
 }
 
+/**
+ * Load several profiles in one query. Missing ids are simply absent from
+ * the result, which is keyed by uid.
+ */
+export async function getUserProfiles(uids: string[]): Promise<Record<string, User>> {
+  const unique = [...new Set(uids)];
+  if (unique.length === 0) return {};
+  const rows = check(await supabase.from('profiles').select('*').in('id', unique));
+  const byId: Record<string, User> = {};
+  for (const row of rows as ProfileRow[]) byId[row.id] = toUser(row);
+  return byId;
+}
+
 export async function getUserProfile(uid: string): Promise<User | null> {
   const row = check(await supabase.from('profiles').select('*').eq('id', uid).maybeSingle());
   return row ? toUser(row as ProfileRow) : null;

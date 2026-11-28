@@ -19,7 +19,9 @@ export default function KeyboardAwareView({ children, style, onKeyboardShown }: 
   const ref = useRef<View>(null);
   const [inset, setInset] = useState(0);
   const onShownRef = useRef(onKeyboardShown);
-  onShownRef.current = onKeyboardShown;
+  useEffect(() => {
+    onShownRef.current = onKeyboardShown;
+  }, [onKeyboardShown]);
 
   useEffect(() => {
     const animate = (e?: KeyboardEvent) => {

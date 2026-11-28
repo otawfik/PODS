@@ -22,7 +22,6 @@ export default function PodDiscoveryScreen({ navigation }: Props) {
   const [search, setSearch] = useState('');
   const [selectedCat, setSelectedCat] = useState<PodCategory | null>(null);
   const [loading, setLoading] = useState(true);
-  const [joiningId, setJoiningId] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState('');
   const [joiningWithCode, setJoiningWithCode] = useState(false);
   const [recs, setRecs] = useState<PodRecommendation[]>([]);
@@ -48,10 +47,8 @@ export default function PodDiscoveryScreen({ navigation }: Props) {
 
   const handleJoin = async (pod: Pod) => {
     if (!userProfile) return;
-    setJoiningId(pod.podId);
     try { await joinPod(pod.podId, userProfile.uid); await refreshProfile(); navigation.navigate('PodDetail', { podId: pod.podId }); }
     catch (err: any) { Alert.alert('Error', err.message); }
-    finally { setJoiningId(null); }
   };
 
   const handleJoinWithCode = async () => {
