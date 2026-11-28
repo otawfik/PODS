@@ -183,3 +183,40 @@ test('deleting an account also clears its blocks, mutes and tokens; reports surv
   assert.ok(!pod.members.includes(gone));
   assert.equal(pod.member_count, pod.members.length);
 });
+
+test('emails are readable only by the owner path and by pod-mates', async () => {
+  // Direct reads of the column are refused for everyone, including yourself.
+  await assert.rejects(
+    rpc(ids.cat, `select email from public.profiles where id = $1`, [ids.dan]),
+    /permission denied/,
+  );
+  await assert.rejects(rpc(ids.cat, `select * from public.profiles`), /permission denied/);
+  // The rest of a profile is still readable.
+  const { rows } = await rpc(
+    ids.cat,
+    `select display_name, university from public.profiles where id = $1`,
+    [ids.dan],
+  );
+  assert.deepEqual(rows, [{ display_name: 'Dan', university: 'Boston University' }]);
+
+  // Pod-mates get each other's emails through the RPC.
+  const mates = await rpc(ids.cat, `select * from public.get_pod_member_emails($1)`, [podId]);
+  const byId = Object.fromEntries(mates.rows.map((r) => [r.profile_id, r.email]));
+  assert.equal(byId[ids.dan], 'dan@bu.edu');
+  assert.equal(byId[ids.cat], 'cat@bu.edu');
+
+  // Someone outside the pod gets nothing.
+  const outsider = '00000000-0000-0000-0000-0000000000c8';
+  await t.signUp(outsider, 'outsider@harvard.edu', { display_name: 'Out' });
+  await assert.rejects(
+    rpc(outsider, `select * from public.get_pod_member_emails($1)`, [podId]),
+    /Only pod members/,
+  );
+
+  // A block hides the pair's emails from each other, not from the rest.
+  await rpc(ids.ben, `select public.block_user($1)`, [ids.ana]);
+  const forAna = await rpc(ids.ana, `select * from public.get_pod_member_emails($1)`, [podId]);
+  const anaSees = forAna.rows.map((r) => r.profile_id);
+  assert.ok(!anaSees.includes(ids.ben));
+  assert.ok(anaSees.includes(ids.cat) && anaSees.includes(ids.ana));
+});

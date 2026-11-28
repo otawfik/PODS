@@ -8,7 +8,8 @@ import { User } from '../types';
 export type ProfileRow = {
   id: string;
   display_name: string;
-  email: string;
+  /** Absent when read from the table: only the owner and pod-mates may see it. */
+  email?: string;
   university: string;
   profile_photo: string | null;
   bio: string | null;
@@ -20,11 +21,19 @@ export type ProfileRow = {
   posts_count: number;
 };
 
+/**
+ * Columns any signed-in user may read. `email` is not among them: the app
+ * takes the signed-in user's own email from the auth session (AuthContext)
+ * and pod-mates' emails from getPodMemberEmails().
+ */
+const PROFILE_COLUMNS =
+  'id, display_name, university, profile_photo, bio, major, interests, join_date, pods_joined, commendations, posts_count';
+
 export function toUser(row: ProfileRow): User {
   return {
     uid: row.id,
     displayName: row.display_name,
-    email: row.email,
+    email: row.email ?? '',
     university: row.university,
     profilePhoto: row.profile_photo ?? undefined,
     bio: row.bio ?? undefined,
@@ -198,15 +207,15 @@ export async function ensureUserProfile(authUser: SupabaseUser): Promise<User> {
 export async function getUserProfiles(uids: string[]): Promise<Record<string, User>> {
   const unique = [...new Set(uids)];
   if (unique.length === 0) return {};
-  const rows = check(await supabase.from('profiles').select('*').in('id', unique));
+  const rows = check(await supabase.from('profiles').select(PROFILE_COLUMNS).in('id', unique));
   const byId: Record<string, User> = {};
-  for (const row of rows as ProfileRow[]) byId[row.id] = toUser(row);
+  for (const row of rows as unknown as ProfileRow[]) byId[row.id] = toUser(row);
   return byId;
 }
 
 export async function getUserProfile(uid: string): Promise<User | null> {
-  const row = check(await supabase.from('profiles').select('*').eq('id', uid).maybeSingle());
-  return row ? toUser(row as ProfileRow) : null;
+  const row = check(await supabase.from('profiles').select(PROFILE_COLUMNS).eq('id', uid).maybeSingle());
+  return row ? toUser(row as unknown as ProfileRow) : null;
 }
 
 /** The profile fields a user may edit. Identity columns are server-owned. */
@@ -231,4 +240,14 @@ export async function updateUserProfile(uid: string, updates: EditableProfile): 
       await supabase.auth.updateUser({ data: { display_name: updates.displayName } });
     }
   }
+}
+
+/** Emails of the members of a pod you belong to, keyed by uid. */
+export async function getPodMemberEmails(podId: string): Promise<Record<string, string>> {
+  const rows = check(await supabase.rpc('get_pod_member_emails', { p_pod_id: podId }));
+  const byId: Record<string, string> = {};
+  for (const row of (rows ?? []) as { profile_id: string; email: string }[]) {
+    byId[row.profile_id] = row.email;
+  }
+  return byId;
 }
