@@ -12,7 +12,7 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "test": "jest",
-    "test:db": "node --test supabase/tests/db.test.mjs",
+    "test:db": "node --test supabase/tests/*.test.mjs",
     "eval:recs": "tsx scripts/eval-recommendations.ts"
   },
   "dependencies": {
@@ -53,6 +53,10 @@
     "testPathIgnorePatterns": [
       "/node_modules/",
       "<rootDir>/supabase/"
-    ]
+    ],
+    "setupFiles": [
+      "<rootDir>/jest.setup.js"
+    ],
+    "testTimeout": 20000
   }
 }
